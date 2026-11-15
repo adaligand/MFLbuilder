@@ -7,7 +7,7 @@ function openPreview() {
     const content = document.getElementById('preview-content');
 
     if (content) {
-        content.innerHTML = `<p style="color:#64748b; text-align:center; padding:24px; margin:0;">⏳ Generating sentence list...</p>`;
+        content.innerHTML = `<div class="preview-sentence" style="color:#64748b;">⏳ Generating sentence list...</div>`;
     }
     if (overlay) overlay.style.display = 'block';
     if (modal) modal.style.display = 'block';
@@ -18,31 +18,25 @@ function openPreview() {
             if (!content) return;
 
             if (!sentences || sentences.length === 0) {
-                content.innerHTML = `<p style="color:#64748b; text-align:center; padding:20px;">No valid sentences generated yet.</p>`;
+                content.innerHTML = "No content yet.";
                 return;
             }
 
             const INITIAL_LIMIT = 250;
-            const renderBatch = (list) => list.map((s, idx) => `
-                <div style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; gap: 12px; font-size: 14px;">
-                    <span><strong style="color:#64748b; margin-right:6px;">${idx + 1}.</strong>${s.t}</span>
-                    <span style="color:#64748b; font-style:italic; text-align:right;">${s.tr || ''}</span>
-                </div>
-            `).join('');
-
-            const headerHTML = `<div style="font-size:13px; font-weight:bold; color:#475569; margin-bottom:8px;">Total combinations: ${sentences.length}</div>`;
+            const renderBatch = (list, offset = 0) => list.map((s, i) =>
+                `<div class="preview-sentence">${offset + i + 1}. <b>${s.t}</b> <span class="tr-text">(${s.tr})</span></div>`
+            ).join('');
 
             if (sentences.length <= INITIAL_LIMIT) {
-                content.innerHTML = headerHTML + renderBatch(sentences);
+                content.innerHTML = renderBatch(sentences);
             } else {
-                content.innerHTML = headerHTML
-                    + renderBatch(sentences.slice(0, INITIAL_LIMIT))
+                content.innerHTML = renderBatch(sentences.slice(0, INITIAL_LIMIT))
                     + `<button id="preview-show-all-btn" class="btn-purple" style="width:100%; margin-top:12px; padding:8px;">Show all ${sentences.length} sentences</button>`;
 
                 const showAllBtn = document.getElementById('preview-show-all-btn');
                 if (showAllBtn) {
                     showAllBtn.onclick = () => {
-                        content.innerHTML = headerHTML + renderBatch(sentences);
+                        content.innerHTML = renderBatch(sentences);
                     };
                 }
             }
