@@ -5,9 +5,13 @@ function openPreview() {
     const modal = document.getElementById('preview-modal');
     const overlay = document.getElementById('overlay');
     const content = document.getElementById('preview-content');
+    const titleEl = modal ? modal.querySelector('h3') : null;
 
+    if (titleEl) {
+        titleEl.innerHTML = 'Sentence List Preview';
+    }
     if (content) {
-        content.innerHTML = `<div class="preview-sentence" style="color:#64748b;">⏳ Generating sentence list...</div>`;
+        content.innerHTML = '<div class="preview-sentence" style="color:#64748b;">⏳ Generating sentence list...</div>';
     }
     if (overlay) overlay.style.display = 'block';
     if (modal) modal.style.display = 'block';
@@ -17,28 +21,43 @@ function openPreview() {
             const sentences = getAssembledSentences();
             if (!content) return;
 
+            if (titleEl) {
+                const countLabel = sentences.length === 1 ? '1 sentence' : `${sentences.length} sentences`;
+                titleEl.innerHTML = `Sentence List Preview <span style="font-size: 14px; font-weight: 600; color: #64748b; margin-left: 8px;">(${countLabel})</span>`;
+            }
+
             if (!sentences || sentences.length === 0) {
                 content.innerHTML = "No content yet.";
                 return;
             }
 
-            const INITIAL_LIMIT = 250;
-            const renderBatch = (list, offset = 0) => list.map((s, i) =>
-                `<div class="preview-sentence">${offset + i + 1}. <b>${s.t}</b> <span class="tr-text">(${s.tr})</span></div>`
-            ).join('');
-
-            if (sentences.length <= INITIAL_LIMIT) {
-                content.innerHTML = renderBatch(sentences);
-            } else {
-                content.innerHTML = renderBatch(sentences.slice(0, INITIAL_LIMIT))
-                    + `<button id="preview-show-all-btn" class="btn-purple" style="width:100%; margin-top:12px; padding:8px;">Show all ${sentences.length} sentences</button>`;
-
-                const showAllBtn = document.getElementById('preview-show-all-btn');
-                if (showAllBtn) {
-                    showAllBtn.onclick = () => {
-                        content.innerHTML = renderBatch(sentences);
-                    };
+            const renderChunk = (start, end) => {
+                let html = '';
+                for (let i = start; i < end; i++) {
+                    const s = sentences[i];
+                    html += `<div class="preview-sentence">${i + 1}. <b>${s.t}</b> <span class="tr-text">(${s.tr})</span></div>`;
                 }
+                return html;
+            };
+
+            const FIRST_BATCH = 300;
+            const firstEnd = Math.min(sentences.length, FIRST_BATCH);
+            content.innerHTML = renderChunk(0, firstEnd);
+
+            // Append remaining sentences smoothly across animation frames so all sentences appear without freezing
+            let cursor = firstEnd;
+            function appendNextBatch() {
+                if (cursor >= sentences.length || modal.style.display === 'none') return;
+                const nextEnd = Math.min(sentences.length, cursor + 500);
+                content.insertAdjacentHTML('beforeend', renderChunk(cursor, nextEnd));
+                cursor = nextEnd;
+                if (cursor < sentences.length) {
+                    requestAnimationFrame(appendNextBatch);
+                }
+            }
+
+            if (cursor < sentences.length) {
+                requestAnimationFrame(appendNextBatch);
             }
         }, 0);
     });
