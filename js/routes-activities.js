@@ -118,6 +118,75 @@ function openActivityMenu() {
    SENTENCE ASSEMBLY & TRANSFORMATIONS
 ========================= */
 function compileTransformRules(rulesText) {
+    const compiled = [];
+    if (!rulesText) return compiled;
+
+    // Escape regex special characters and match both straight (') and curly (’) apostrophes
+    const escapeFlex = s => s
+        .replace(/[-[\]{}()*+?^$|#\s\\.]/g, '\\$&')
+        .replace(/['’]/g, "['’]");
+
+    const addBounds = (raw, pat) => {
+        if (/^[\w\u00C0-\u024F]/.test(raw)) pat = '(?<![a-zA-Z0-9\u00C0-\u024F])' + pat;
+        if (/[\w\u00C0-\u024F]$/.test(raw)) pat = pat + '(?![a-zA-Z0-9\u00C0-\u024F])';
+        return pat;
+    };
+
+    for (let line of rulesText.split('\n')) {
+        const rawLine = line.replace(/[\r\n]/g, '');
+        if (!rawLine.trim() || !rawLine.includes('=')) continue;
+
+        const eqIdx = rawLine.indexOf('=');
+        let find = rawLine.substring(0, eqIdx);
+        let replace = rawLine.substring(eqIdx + 1);
+
+        if (find.endsWith(' ') && replace.startsWith(' ')) {
+            find = find.slice(0, -1).trim();
+            replace = replace.slice(1);
+        } else {
+            find = find.trim();
+        }
+        if (!find) continue;
+
+        // 1. Trigger rule: word1$word2=replacement
+        if (find.includes('$')) {
+            const subParts = find.split('$').map(s => s.trim());
+            if (subParts.length === 2 && subParts[0] && subParts[1]) {
+                const [w1, w2] = subParts;
+                const p1 = addBounds(w1, escapeFlex(w1));
+                const p2 = addBounds(w2, escapeFlex(w2));
+                compiled.push({
+                    type: 'trigger',
+                    regex: new RegExp(`(${p1}.*?)${p2}`, 'gi'),
+                    replace
+                });
+            }
+        }
+        // 2. Discontinuous rule: word1+word3=replacement
+        else if (find.includes('+')) {
+            const subParts = find.split('+').map(s => s.trim());
+            if (subParts.length === 2 && subParts[0] && subParts[1]) {
+                const [w1, w3] = subParts;
+                const p1 = addBounds(w1, escapeFlex(w1));
+                const p3 = addBounds(w3, escapeFlex(w3));
+                compiled.push({
+                    type: 'split',
+                    regex: new RegExp(`${p1}\\s+(.+?)\\s+${p3}`, 'gi'),
+                    replace: `${replace} $1`
+                });
+            }
+        }
+        // 3. Standard replace / delete rule: word1=word2
+        else {
+            compiled.push({
+                type: 'std',
+                regex: new RegExp(addBounds(find, escapeFlex(find)), 'gi'),
+                replace
+            });
+        }
+    }
+    return compiled;
+}
 
 function compileExclusionRegexes(rulesText) {
     const compiled = [];
@@ -154,7 +223,7 @@ function applyCompiledTransformations(text, compiledRules) {
 
 function applyTransformations(text, rulesText) {
     if (!text || !rulesText) return text;
-    return applyCompiledTransformations(text, compileTransformationRules(rulesText));
+    return applyCompiledTransformations(text, compileTransformRules(rulesText));
 }
 
 function shouldExcludeSentence(text, rulesText) {
@@ -177,12 +246,15 @@ function getAssembledSentences(customGridContext = null) {
     }
 
     let targetGrid = (ctx && ctx.grid) ? ctx.grid : grid;
+    if (!targetGrid || !targetGrid.length || !targetGrid[0]) return [];
+
     let targetRules = (ctx && ctx.transformationsText !== undefined)
         ? ctx.transformationsText
         : (activeAssignmentTransformationsText !== null ? activeAssignmentTransformationsText : (document.getElementById('transformations-input')?.value || transformationsText || ""));
 
-    const compiledRules = compileTransformationRules(targetRules);
+    const compiledRules = compileTransformRules(targetRules);
     const exclusionRegexes = compileExclusionRegexes(targetRules);
+    const memo = new Map();
 
     let allSentences = [];
     for (let r = 0; r < targetGrid.length; r++) {
@@ -190,7 +262,7 @@ function getAssembledSentences(customGridContext = null) {
             let cell = targetGrid[r][0];
             let rSpan = cell.rS || 1;
             for (let subR = r; subR < r + rSpan; subR++) {
-                let paths = findPaths(r, 0, subR, ctx);
+                let paths = findPaths(r, 0, subR, ctx, memo);
                 paths.forEach(p => { p.originRow = subR; });
                 allSentences = allSentences.concat(paths);
             }
@@ -199,20 +271,27 @@ function getAssembledSentences(customGridContext = null) {
 
     const unique = [];
     const seen = new Set();
-    allSentences.forEach(s => {
-        if (exclusionRegexes.some(rx => rx.test(s.t) || rx.test(s.tr))) return;
+    for (let i = 0; i < allSentences.length; i++) {
+        const s = allSentences[i];
+        if (exclusionRegexes.some(rx => rx.test(s.t) || rx.test(s.tr))) continue;
 
-        s.t = cleanSentenceSpacing(applyCompiledTransformations(s.t, compiledRules));
-        s.tr = cleanSentenceSpacing(applyCompiledTransformations(s.tr, compiledRules));
+        const cleanT = cleanSentenceSpacing(applyCompiledTransformations(s.t, compiledRules));
+        const cleanTr = cleanSentenceSpacing(applyCompiledTransformations(s.tr, compiledRules));
 
-        const text = s.t.trim();
-        if (text && !seen.has(text)) {
-            unique.push(s);
-            seen.add(text);
+        if (cleanT && !seen.has(cleanT)) {
+            unique.push({
+                t: cleanT,
+                tr: cleanTr,
+                parts: s.parts,
+                details: s.details,
+                originRow: s.originRow
+            });
+            seen.add(cleanT);
         }
-    });
+    }
     return unique;
 }
+
 /* =========================
    PATH VALIDATION ENGINE
 ========================= */
@@ -257,7 +336,7 @@ function isPathValid(partsMeta, ctx = null) {
 }
 
 /* =========================================================
-   PATH ENGINE WITH TALL CELLS & BRIDGE/EMPTY COLUMN TRAVERSAL
+   PATH ENGINE WITH MEMOIZATION & BRIDGE/EMPTY COLUMN TRAVERSAL
    ========================================================= */
 function cleanSentenceSpacing(str) {
     if (!str) return "";
@@ -268,8 +347,13 @@ function cleanSentenceSpacing(str) {
         .trim();
 }
 
-function findPaths(r, c, activeRow = null, customCtx = null) {
+function findPaths(r, c, activeRow = null, customCtx = null, memo = null) {
     const targetGrid = (customCtx && customCtx.grid) ? customCtx.grid : (activeAssignmentGrid || grid);
+    const cacheKey = `${r}_${c}`;
+    if (memo && memo.has(cacheKey)) {
+        return memo.get(cacheKey);
+    }
+
     let cell = getCellAt(r, c, targetGrid);
     if (!cell) return [];
 
@@ -291,7 +375,9 @@ function findPaths(r, c, activeRow = null, customCtx = null) {
         }));
 
     if (nextCol >= targetGrid[0].length) {
-        return currentOptions.filter(path => isPathValid(path.parts, customCtx));
+        const leafRes = currentOptions.filter(path => isPathValid(path.parts, customCtx));
+        if (memo) memo.set(cacheKey, leafRes);
+        return leafRes;
     }
 
     let combinedSubPaths = [];
@@ -316,36 +402,41 @@ function findPaths(r, c, activeRow = null, customCtx = null) {
         if (visitedTargetRoots.has(targetKey)) continue;
         visitedTargetRoots.add(targetKey);
 
-        combinedSubPaths = combinedSubPaths.concat(findPaths(targetRootRow, nextCol, evalRow, customCtx));
+        combinedSubPaths = combinedSubPaths.concat(findPaths(targetRootRow, nextCol, evalRow, customCtx, memo));
     }
 
+    let result;
     if (isCurrBridge) {
-        return combinedSubPaths.map(sp => ({
+        result = combinedSubPaths.map(sp => ({
             t: sp.t, tr: sp.tr,
             parts: [{ r: r, c: c, isBridge: true }, ...sp.parts],
             details: sp.details || []
         }));
+    } else if (currentOptions.length === 0) {
+        result = combinedSubPaths.filter(p => isPathValid(p.parts, customCtx));
+    } else if (combinedSubPaths.length === 0) {
+        result = currentOptions.filter(p => isPathValid(p.parts, customCtx));
+    } else {
+        result = [];
+        for (let i = 0; i < currentOptions.length; i++) {
+            const curr = currentOptions[i];
+            for (let j = 0; j < combinedSubPaths.length; j++) {
+                const sub = combinedSubPaths[j];
+                const combinedParts = [...curr.parts, ...sub.parts];
+                if (isPathValid(combinedParts, customCtx)) {
+                    result.push({
+                        t: curr.t + " " + sub.t,
+                        tr: curr.tr ? (sub.tr ? curr.tr + " " + sub.tr : curr.tr) : sub.tr,
+                        parts: combinedParts,
+                        details: [...(curr.details || []), ...(sub.details || [])]
+                    });
+                }
+            }
+        }
     }
 
-    if (currentOptions.length === 0) return combinedSubPaths.filter(p => isPathValid(p.parts, customCtx));
-    if (combinedSubPaths.length === 0) return currentOptions.filter(p => isPathValid(p.parts, customCtx));
-
-    let finalPaths = [];
-    currentOptions.forEach(curr => {
-        combinedSubPaths.forEach(sub => {
-            const combinedParts = [...curr.parts, ...sub.parts];
-            if (isPathValid(combinedParts, customCtx)) {
-                finalPaths.push({
-                    t: cleanSentenceSpacing(curr.t + " " + sub.t),
-                    tr: cleanSentenceSpacing(curr.tr + " " + sub.tr),
-                    parts: combinedParts,
-                    details: [...(curr.details || []), ...(sub.details || [])]
-                });
-            }
-        });
-    });
-
-    return finalPaths;
+    if (memo) memo.set(cacheKey, result);
+    return result;
 }
 
 /* =========================
@@ -514,12 +605,32 @@ function highlightRouteCells(parts, highlight) {
 }
 
 function getAllRawRoutes() {
-    const backupDisabled = [...disabledRoutes];
-    disabledRoutes = [];
-    const allPaths = getAssembledSentences();
-    disabledRoutes = backupDisabled;
+    if (!grid || !grid.length || !grid[0]) return [];
 
+    // Collapse each cell to at most 1 sample item so route enumeration traverses cells, not every vocab line
+    const cellRepresentativeGrid = grid.map(row =>
+        row.map(cell => {
+            if (!cell) return cell;
+            const firstValid = (cell.items || []).find(it => it.t && it.t.trim() !== "" && it.t.trim().toLowerCase() !== "bridge");
+            return {
+                ...cell,
+                items: firstValid ? [firstValid] : []
+            };
+        })
+    );
+
+    const routeCtx = {
+        grid: cellRepresentativeGrid,
+        disabledRoutes: [],
+        excludedCombos: excludedCombos || [],
+        requiredCombos: requiredCombos || [],
+        excludedPairs: excludedPairs || [],
+        transformationsText: document.getElementById('transformations-input')?.value || transformationsText || ""
+    };
+
+    const allPaths = getAssembledSentences(routeCtx);
     const routesMap = new Map();
+
     allPaths.forEach(p => {
         const contentParts = p.parts.filter(pt => !pt.isBridge);
         const key = contentParts.map(pt => `${pt.r + 1}.${pt.c + 1}`).join('+');
