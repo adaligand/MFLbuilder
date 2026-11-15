@@ -59,6 +59,7 @@ function goToDashboard() {
     nav.year = null;
     nav.topic = null;
     showPage('library-page');
+    renderLibrary();
 }
 async function renderYearGroupsInline() {
     const yearArea = document.getElementById("year-group-area");
