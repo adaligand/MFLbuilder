@@ -117,68 +117,7 @@ function openActivityMenu() {
 /* =========================
    SENTENCE ASSEMBLY & TRANSFORMATIONS
 ========================= */
-function compileTransformationRules(rulesText) {
-    const compiled = [];
-    if (!rulesText) return compiled;
-
-    const escapeReg = s => s.replace(/[-[\]{}()*+?^$|#\s\\.]/g, '\\$&');
-    const lines = rulesText.split('\n');
-
-    for (let line of lines) {
-        const rawLine = line.replace(/[\r\n]/g, '');
-        if (!rawLine.trim() || !rawLine.includes('=')) continue;
-
-        const eqIdx = rawLine.indexOf('=');
-        let find = rawLine.substring(0, eqIdx);
-        let replace = rawLine.substring(eqIdx + 1);
-
-        if (find.endsWith(' ') && replace.startsWith(' ')) {
-            find = find.slice(0, -1).trim();
-            replace = replace.slice(1);
-        } else {
-            find = find.trim();
-        }
-
-        if (!find) continue;
-
-        if (find.includes('$')) {
-            const subParts = find.split('$').map(s => s.trim());
-            if (subParts.length === 2 && subParts[0] && subParts[1]) {
-                const [w1, w2] = subParts;
-                let p1 = escapeReg(w1);
-                let p2 = escapeReg(w2);
-
-                if (/^[\w\u00C0-\u024F]/.test(w1)) p1 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p1;
-                if (/[\w\u00C0-\u024F]$/.test(w1)) p1 = p1 + '(?![a-zA-Z0-9\u00C0-\u024F])';
-                if (/^[\w\u00C0-\u024F]/.test(w2)) p2 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p2;
-                if (/[\w\u00C0-\u024F]$/.test(w2)) p2 = p2 + '(?![a-zA-Z0-9\u00C0-\u024F])';
-
-                compiled.push({ type: 'trigger', regex: new RegExp(`(${p1}.*?)${p2}`, 'gi'), replace });
-            }
-        } else if (find.includes('+')) {
-            const subParts = find.split('+').map(s => s.trim());
-            if (subParts.length === 2 && subParts[0] && subParts[1]) {
-                const [w1, w3] = subParts;
-                let p1 = escapeReg(w1);
-                let p3 = escapeReg(w3);
-
-                if (/^[\w\u00C0-\u024F]/.test(w1)) p1 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p1;
-                if (/[\w\u00C0-\u024F]$/.test(w1)) p1 = p1 + '(?![a-zA-Z0-9\u00C0-\u024F])';
-                if (/^[\w\u00C0-\u024F]/.test(w3)) p3 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p3;
-                if (/[\w\u00C0-\u024F]$/.test(w3)) p3 = p3 + '(?![a-zA-Z0-9\u00C0-\u024F])';
-
-                compiled.push({ type: 'split', regex: new RegExp(`${p1}\\s+(.+?)\\s+${p3}`, 'gi'), replace: `${replace} $1` });
-            }
-        } else {
-            let pattern = escapeReg(find);
-            if (/^[\w\u00C0-\u024F]/.test(find)) pattern = '(?<![a-zA-Z0-9\u00C0-\u024F])' + pattern;
-            if (/[\w\u00C0-\u024F]$/.test(find)) pattern = pattern + '(?![a-zA-Z0-9\u00C0-\u024F])';
-
-            compiled.push({ type: 'std', regex: new RegExp(pattern, 'gi'), replace });
-        }
-    }
-    return compiled;
-}
+function compileTransformRules(rulesText) {
 
 function compileExclusionRegexes(rulesText) {
     const compiled = [];
