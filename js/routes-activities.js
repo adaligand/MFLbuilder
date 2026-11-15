@@ -2,11 +2,52 @@
    PREVIEW & OPTIONS MENU
 ========================= */
 function openPreview() {
-    const sentences = getAssembledSentences();
-    const content = sentences.map((s, i) => `<div class="preview-sentence">${i+1}. <b>${s.t}</b> <span class="tr-text">(${s.tr})</span></div>`).join('');
-    document.getElementById('preview-content').innerHTML = content || "No content yet.";
-    document.getElementById('preview-modal').style.display = 'block';
-    document.getElementById('overlay').style.display = 'block';
+    const modal = document.getElementById('preview-modal');
+    const overlay = document.getElementById('overlay');
+    const content = document.getElementById('preview-content');
+
+    if (content) {
+        content.innerHTML = `<p style="color:#64748b; text-align:center; padding:24px; margin:0;">⏳ Generating sentence list...</p>`;
+    }
+    if (overlay) overlay.style.display = 'block';
+    if (modal) modal.style.display = 'block';
+
+    requestAnimationFrame(() => {
+        setTimeout(() => {
+            const sentences = getAssembledSentences();
+            if (!content) return;
+
+            if (!sentences || sentences.length === 0) {
+                content.innerHTML = `<p style="color:#64748b; text-align:center; padding:20px;">No valid sentences generated yet.</p>`;
+                return;
+            }
+
+            const INITIAL_LIMIT = 250;
+            const renderBatch = (list) => list.map((s, idx) => `
+                <div style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; gap: 12px; font-size: 14px;">
+                    <span><strong style="color:#64748b; margin-right:6px;">${idx + 1}.</strong>${s.t}</span>
+                    <span style="color:#64748b; font-style:italic; text-align:right;">${s.tr || ''}</span>
+                </div>
+            `).join('');
+
+            const headerHTML = `<div style="font-size:13px; font-weight:bold; color:#475569; margin-bottom:8px;">Total combinations: ${sentences.length}</div>`;
+
+            if (sentences.length <= INITIAL_LIMIT) {
+                content.innerHTML = headerHTML + renderBatch(sentences);
+            } else {
+                content.innerHTML = headerHTML
+                    + renderBatch(sentences.slice(0, INITIAL_LIMIT))
+                    + `<button id="preview-show-all-btn" class="btn-purple" style="width:100%; margin-top:12px; padding:8px;">Show all ${sentences.length} sentences</button>`;
+
+                const showAllBtn = document.getElementById('preview-show-all-btn');
+                if (showAllBtn) {
+                    showAllBtn.onclick = () => {
+                        content.innerHTML = headerHTML + renderBatch(sentences);
+                    };
+                }
+            }
+        }, 0);
+    });
 }
 
 function openActivityMenu() {
@@ -63,8 +104,11 @@ function openActivityMenu() {
 /* =========================
    SENTENCE ASSEMBLY & TRANSFORMATIONS
 ========================= */
-function applyTransformations(text, rulesText) {
-    if (!text || !rulesText) return text;
+function compileTransformationRules(rulesText) {
+    const compiled = [];
+    if (!rulesText) return compiled;
+
+    const escapeReg = s => s.replace(/[-[\]{}()*+?^$|#\s\\.]/g, '\\$&');
     const lines = rulesText.split('\n');
 
     for (let line of lines) {
@@ -75,7 +119,6 @@ function applyTransformations(text, rulesText) {
         let find = rawLine.substring(0, eqIdx);
         let replace = rawLine.substring(eqIdx + 1);
 
-        // If formatted as "find = replace" with surrounding spaces, strip 1 formatting space from each side
         if (find.endsWith(' ') && replace.startsWith(' ')) {
             find = find.slice(0, -1).trim();
             replace = replace.slice(1);
@@ -83,66 +126,89 @@ function applyTransformations(text, rulesText) {
             find = find.trim();
         }
 
-        if (find) {
-            const escapeReg = s => s.replace(/[-[\]{}()*+?^$|#\s\\.]/g, '\\$&');
+        if (!find) continue;
 
-            // 1. Triggered / Conditional rule: trigger$target=replacement
-            if (find.includes('$')) {
-                const subParts = find.split('$').map(s => s.trim());
-                if (subParts.length === 2 && subParts[0] && subParts[1]) {
-                    const [w1, w2] = subParts;
-                    let p1 = escapeReg(w1);
-                    let p2 = escapeReg(w2);
+        if (find.includes('$')) {
+            const subParts = find.split('$').map(s => s.trim());
+            if (subParts.length === 2 && subParts[0] && subParts[1]) {
+                const [w1, w2] = subParts;
+                let p1 = escapeReg(w1);
+                let p2 = escapeReg(w2);
 
-                    if (/^[\w\u00C0-\u024F]/.test(w1)) p1 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p1;
-                    if (/[\w\u00C0-\u024F]$/.test(w1)) p1 = p1 + '(?![a-zA-Z0-9\u00C0-\u024F])';
+                if (/^[\w\u00C0-\u024F]/.test(w1)) p1 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p1;
+                if (/[\w\u00C0-\u024F]$/.test(w1)) p1 = p1 + '(?![a-zA-Z0-9\u00C0-\u024F])';
+                if (/^[\w\u00C0-\u024F]/.test(w2)) p2 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p2;
+                if (/[\w\u00C0-\u024F]$/.test(w2)) p2 = p2 + '(?![a-zA-Z0-9\u00C0-\u024F])';
 
-                    if (/^[\w\u00C0-\u024F]/.test(w2)) p2 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p2;
-                    if (/[\w\u00C0-\u024F]$/.test(w2)) p2 = p2 + '(?![a-zA-Z0-9\u00C0-\u024F])';
-
-                    const regex = new RegExp(`(${p1}.*?)${p2}`, 'gi');
-                    let prev, guard = 0;
-                    do {
-                        prev = text;
-                        text = text.replace(regex, (match, prefix) => prefix + replace);
-                    } while (text !== prev && ++guard < 20);
-                }
+                compiled.push({ type: 'trigger', regex: new RegExp(`(${p1}.*?)${p2}`, 'gi'), replace });
             }
-            // 2. Split / Discontinuous rule: word1+word3=replacement
-            else if (find.includes('+')) {
-                const subParts = find.split('+').map(s => s.trim());
-                if (subParts.length === 2 && subParts[0] && subParts[1]) {
-                    const [w1, w3] = subParts;
-                    let p1 = escapeReg(w1);
-                    let p3 = escapeReg(w3);
+        } else if (find.includes('+')) {
+            const subParts = find.split('+').map(s => s.trim());
+            if (subParts.length === 2 && subParts[0] && subParts[1]) {
+                const [w1, w3] = subParts;
+                let p1 = escapeReg(w1);
+                let p3 = escapeReg(w3);
 
-                    if (/^[\w\u00C0-\u024F]/.test(w1)) p1 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p1;
-                    if (/[\w\u00C0-\u024F]$/.test(w1)) p1 = p1 + '(?![a-zA-Z0-9\u00C0-\u024F])';
+                if (/^[\w\u00C0-\u024F]/.test(w1)) p1 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p1;
+                if (/[\w\u00C0-\u024F]$/.test(w1)) p1 = p1 + '(?![a-zA-Z0-9\u00C0-\u024F])';
+                if (/^[\w\u00C0-\u024F]/.test(w3)) p3 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p3;
+                if (/[\w\u00C0-\u024F]$/.test(w3)) p3 = p3 + '(?![a-zA-Z0-9\u00C0-\u024F])';
 
-                    if (/^[\w\u00C0-\u024F]/.test(w3)) p3 = '(?<![a-zA-Z0-9\u00C0-\u024F])' + p3;
-                    if (/[\w\u00C0-\u024F]$/.test(w3)) p3 = p3 + '(?![a-zA-Z0-9\u00C0-\u024F])';
-
-                    const regex = new RegExp(`${p1}\\s+(.+?)\\s+${p3}`, 'gi');
-                    text = text.replace(regex, `${replace} $1`);
-                }
-            } 
-            // 3. Standard replace / delete rule
-            else {
-                let pattern = escapeReg(find);
-
-                if (/^[\w\u00C0-\u024F]/.test(find)) {
-                    pattern = '(?<![a-zA-Z0-9\u00C0-\u024F])' + pattern;
-                }
-                if (/[\w\u00C0-\u024F]$/.test(find)) {
-                    pattern = pattern + '(?![a-zA-Z0-9\u00C0-\u024F])';
-                }
-
-                const regex = new RegExp(pattern, 'gi');
-                text = text.replace(regex, replace);
+                compiled.push({ type: 'split', regex: new RegExp(`${p1}\\s+(.+?)\\s+${p3}`, 'gi'), replace: `${replace} $1` });
             }
+        } else {
+            let pattern = escapeReg(find);
+            if (/^[\w\u00C0-\u024F]/.test(find)) pattern = '(?<![a-zA-Z0-9\u00C0-\u024F])' + pattern;
+            if (/[\w\u00C0-\u024F]$/.test(find)) pattern = pattern + '(?![a-zA-Z0-9\u00C0-\u024F])';
+
+            compiled.push({ type: 'std', regex: new RegExp(pattern, 'gi'), replace });
+        }
+    }
+    return compiled;
+}
+
+function compileExclusionRegexes(rulesText) {
+    const compiled = [];
+    if (!rulesText) return compiled;
+
+    const escapeReg = s => s.replace(/[-[\]{}()*+?^$|#\s\\]/g, '\\$&');
+    for (let line of rulesText.split('\n')) {
+        line = line.trim();
+        if (!line || line.includes('=') || !line.includes('*')) continue;
+        const tokens = line.split('*').map(t => t.trim()).filter(Boolean);
+        if (tokens.length >= 2) {
+            compiled.push(new RegExp(tokens.map(escapeReg).join('.*?'), 'i'));
+        }
+    }
+    return compiled;
+}
+
+function applyCompiledTransformations(text, compiledRules) {
+    if (!text || !compiledRules || compiledRules.length === 0) return text;
+    for (let i = 0; i < compiledRules.length; i++) {
+        const rule = compiledRules[i];
+        if (rule.type === 'trigger') {
+            let prev, guard = 0;
+            do {
+                prev = text;
+                text = text.replace(rule.regex, (match, prefix) => prefix + rule.replace);
+            } while (text !== prev && ++guard < 20);
+        } else {
+            text = text.replace(rule.regex, rule.replace);
         }
     }
     return text.replace(/\s+/g, ' ').trim();
+}
+
+function applyTransformations(text, rulesText) {
+    if (!text || !rulesText) return text;
+    return applyCompiledTransformations(text, compileTransformationRules(rulesText));
+}
+
+function shouldExcludeSentence(text, rulesText) {
+    if (!text || !rulesText) return false;
+    const regexes = compileExclusionRegexes(rulesText);
+    return regexes.some(rx => rx.test(text));
 }
 
 function getAssembledSentences(customGridContext = null) {
@@ -163,6 +229,9 @@ function getAssembledSentences(customGridContext = null) {
         ? ctx.transformationsText
         : (activeAssignmentTransformationsText !== null ? activeAssignmentTransformationsText : (document.getElementById('transformations-input')?.value || transformationsText || ""));
 
+    const compiledRules = compileTransformationRules(targetRules);
+    const exclusionRegexes = compileExclusionRegexes(targetRules);
+
     let allSentences = [];
     for (let r = 0; r < targetGrid.length; r++) {
         if (!targetGrid[r][0].hidden) {
@@ -179,10 +248,10 @@ function getAssembledSentences(customGridContext = null) {
     const unique = [];
     const seen = new Set();
     allSentences.forEach(s => {
-        if (shouldExcludeSentence(s.t, targetRules) || shouldExcludeSentence(s.tr, targetRules)) return;
+        if (exclusionRegexes.some(rx => rx.test(s.t) || rx.test(s.tr))) return;
 
-        s.t = cleanSentenceSpacing(applyTransformations(s.t, targetRules));
-        s.tr = cleanSentenceSpacing(applyTransformations(s.tr, targetRules));
+        s.t = cleanSentenceSpacing(applyCompiledTransformations(s.t, compiledRules));
+        s.tr = cleanSentenceSpacing(applyCompiledTransformations(s.tr, compiledRules));
 
         const text = s.t.trim();
         if (text && !seen.has(text)) {
@@ -192,30 +261,6 @@ function getAssembledSentences(customGridContext = null) {
     });
     return unique;
 }
-
-// Checks for exclusion rules using '*' (e.g., word1 * word2)
-function shouldExcludeSentence(text, rulesText) {
-    if (!text || !rulesText) return false;
-    const lines = rulesText.split('\n');
-    
-    for (let line of lines) {
-        line = line.trim();
-        if (!line || line.includes('=')) continue;
-
-        // Lines with '*' (and no '=') are treated as exclusion rules
-        if (line.includes('*')) {
-            const tokens = line.split('*').map(t => t.trim()).filter(Boolean);
-            if (tokens.length >= 2) {
-                const escapeReg = s => s.replace(/[-[\]{}()*+?^$|#\s\\]/g, '\\$&');
-                // Matches token 1 followed anywhere later by token 2
-                const pattern = tokens.map(escapeReg).join('.*?');
-                if (new RegExp(pattern, 'i').test(text)) return true;
-            }
-        }
-    }
-    return false;
-}
-
 /* =========================
    PATH VALIDATION ENGINE
 ========================= */
@@ -355,20 +400,28 @@ function findPaths(r, c, activeRow = null, customCtx = null) {
    ROUTES & CELL COMBOS MODAL LOGIC
 ========================= */
 function openRoutesModal() {
-    comboPickerMode = null;
-    currentComboSelection = [];
-    document.getElementById('combo-picker-status').style.display = 'none';
+    const pickerStatus = document.getElementById('combo-picker-status');
+    if (pickerStatus) pickerStatus.style.display = 'none';
 
     const transInput = document.getElementById('transformations-input');
     if (transInput) {
         transInput.value = transformationsText || "";
     }
 
-    renderRoutesPreviewGrid();
-    switchRoutesTab('routes');
-    
+    const routesList = document.getElementById('routes-list-container');
+    if (routesList) {
+        routesList.innerHTML = `<p style="color:#64748b; text-align:center; padding:24px; margin:0;">⏳ Loading routes...</p>`;
+    }
+
     document.getElementById('routes-modal').style.display = 'flex';
     document.getElementById('overlay').style.display = 'block';
+
+    requestAnimationFrame(() => {
+        setTimeout(() => {
+            renderRoutesPreviewGrid();
+            switchRoutesTab('routes');
+        }, 0);
+    });
 }
 
 function switchRoutesTab(tab) {
