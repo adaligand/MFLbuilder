@@ -54,7 +54,12 @@ async function renderLibrary() {
         await renderYearGroupsInline();
     }
 }
-
+function goToDashboard() {
+    nav.lang = null;
+    nav.year = null;
+    nav.topic = null;
+    showPage('library-page');
+}
 async function renderYearGroupsInline() {
     const yearArea = document.getElementById("year-group-area");
     const topicArea = document.getElementById("topic-area");
