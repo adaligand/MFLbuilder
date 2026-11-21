@@ -236,7 +236,7 @@ function hideSentenceTableCountControl() {
 function removeStraySentenceCountFromCol3(col3) {
     if (!col3) return;
 
-    col3.querySelectorAll('label[for="sentence-count"]').forEach(el => {
+    col3.querySelectorAll('label[for="sentence-count"], label[for="table-sentence-count"], #table-sentence-count').forEach(el => {
         const parent = el.parentElement;
         el.remove();
         if (parent && parent !== col3 && parent.children.length === 0 && (parent.textContent || '').trim() === '') {
@@ -245,7 +245,7 @@ function removeStraySentenceCountFromCol3(col3) {
     });
 
     Array.from(col3.querySelectorAll('label, span, div, p')).forEach(el => {
-        if (el.children.length === 0 && /^Exercise Sentence Count\s*:?$/i.test((el.textContent || '').trim())) {
+        if (el.children.length === 0 && /^(Exercise\s+)?Sentence(\s+Table)?\s+Count\s*:?$/i.test((el.textContent || '').trim())) {
             const parent = el.parentElement;
             el.remove();
             if (parent && parent !== col3 && parent.children.length === 0 && (parent.textContent || '').trim() === '') {
@@ -255,7 +255,7 @@ function removeStraySentenceCountFromCol3(col3) {
     });
 
     Array.from(col3.childNodes).forEach(node => {
-        if (node.nodeType === Node.TEXT_NODE && /^Exercise Sentence Count\s*:?$/i.test((node.textContent || '').trim())) {
+        if (node.nodeType === Node.TEXT_NODE && /^(Exercise\s+)?Sentence(\s+Table)?\s+Count\s*:?$/i.test((node.textContent || '').trim())) {
             node.remove();
         }
     });
@@ -284,52 +284,93 @@ function arrangeActivityMenuLayout() {
 
     const columnsWrapper = col1 ? col1.parentElement : null;
     if (columnsWrapper && columnsWrapper.children.length >= 3) {
+        columnsWrapper.style.setProperty('box-sizing', 'border-box', 'important');
+        columnsWrapper.style.setProperty('width', '100%', 'important');
+        columnsWrapper.style.setProperty('max-width', '100%', 'important');
+        columnsWrapper.style.setProperty('overflow', 'hidden', 'important');
+
         const cols = Array.from(columnsWrapper.children);
         const col2 = cols.find(el => el.contains(sentencesContainer));
         const col3 = cols.find(el => el !== col1 && el !== col2);
 
         const wrapperDisplay = window.getComputedStyle(columnsWrapper).display;
         if (wrapperDisplay === 'grid') {
-            columnsWrapper.style.setProperty('grid-template-columns', '320px minmax(0, 1fr) 235px', 'important');
+            columnsWrapper.style.setProperty('grid-template-columns', '275px minmax(0, 1fr) 245px', 'important');
         } else {
             columnsWrapper.style.setProperty('display', 'flex', 'important');
             columnsWrapper.style.setProperty('align-items', 'stretch', 'important');
         }
 
         if (col1) {
-            col1.style.setProperty('flex', '0 0 320px', 'important');
-            col1.style.setProperty('width', '320px', 'important');
-            col1.style.setProperty('min-width', '320px', 'important');
-            col1.style.setProperty('max-width', '320px', 'important');
+            col1.style.setProperty('box-sizing', 'border-box', 'important');
+            col1.style.setProperty('flex', '0 0 275px', 'important');
+            col1.style.setProperty('width', '275px', 'important');
+            col1.style.setProperty('min-width', '275px', 'important');
+            col1.style.setProperty('max-width', '275px', 'important');
         }
         if (col2) {
+            col2.style.setProperty('box-sizing', 'border-box', 'important');
             col2.style.setProperty('flex', '1 1 auto', 'important');
             col2.style.setProperty('min-width', '0', 'important');
+            col2.style.setProperty('overflow-x', 'hidden', 'important');
         }
         if (col3) {
-            col3.style.setProperty('flex', '0 0 235px', 'important');
-            col3.style.setProperty('width', '235px', 'important');
-            col3.style.setProperty('min-width', '225px', 'important');
-            col3.style.setProperty('max-width', '245px', 'important');
+            col3.style.setProperty('box-sizing', 'border-box', 'important');
+            col3.style.setProperty('flex', '0 0 245px', 'important');
+            col3.style.setProperty('width', '245px', 'important');
+            col3.style.setProperty('min-width', '230px', 'important');
+            col3.style.setProperty('max-width', '250px', 'important');
+            col3.style.setProperty('overflow-x', 'hidden', 'important');
+
+            col3.querySelectorAll('button, select, input').forEach(el => {
+                el.style.setProperty('max-width', '100%', 'important');
+                el.style.setProperty('box-sizing', 'border-box', 'important');
+            });
         }
 
         // Move "Exercise Sentence Count:" + add Estimated Time badge next to "2. Customize Exercise Sentences"
         if (col2) {
             let headerBar = document.getElementById('customize-sentences-header-bar');
             if (!headerBar) {
-                const headingEl = Array.from(col2.children).find(el =>
+                const headingBlock = Array.from(col2.children).find(el =>
                     el !== sentencesContainer && /Customize Exercise Sentences/i.test(el.textContent || '')
                 );
 
-                if (headingEl) {
+                if (headingBlock) {
+                    // Separate the heading title from any subtitle paragraph inside headingBlock
+                    let titleEl = headingBlock;
+                    let subtitleEl = null;
+
+                    if (headingBlock.children.length > 0) {
+                        const foundTitle = Array.from(headingBlock.children).find(ch =>
+                            /Customize Exercise Sentences/i.test(ch.textContent || '')
+                        );
+                        if (foundTitle) {
+                            titleEl = foundTitle;
+                            subtitleEl = Array.from(headingBlock.children).find(ch => ch !== foundTitle) || null;
+                        }
+                    }
+
                     headerBar = document.createElement('div');
                     headerBar.id = 'customize-sentences-header-bar';
-                    headerBar.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 4px;';
+                    headerBar.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; width: 100%;';
 
-                    headingEl.style.margin = '0';
-                    headingEl.style.whiteSpace = 'nowrap';
-                    headingEl.parentNode.insertBefore(headerBar, headingEl);
-                    headerBar.appendChild(headingEl);
+                    titleEl.style.margin = '0';
+                    titleEl.style.whiteSpace = 'nowrap';
+
+                    headingBlock.parentNode.insertBefore(headerBar, headingBlock);
+                    headerBar.appendChild(titleEl);
+
+                    if (subtitleEl) {
+                        subtitleEl.style.margin = '0 0 8px 0';
+                        subtitleEl.style.display = 'block';
+                        subtitleEl.style.whiteSpace = 'normal';
+                        headingBlock.parentNode.insertBefore(subtitleEl, headingBlock);
+                    }
+
+                    if (headingBlock !== titleEl && headingBlock.children.length === 0) {
+                        headingBlock.remove();
+                    }
 
                     const controlsRight = document.createElement('div');
                     controlsRight.id = 'customize-header-controls';
@@ -845,7 +886,7 @@ function openPreview() {
 
 function openActivityMenu() {
     editingAssignmentId = null;
-    window.editingSavedSentencesMap = null;
+    window.editingSavedSentencesMap = {};
     window.duplicatingAssignmentLang = null;
 
     hideSentenceTableCountControl();
@@ -1754,7 +1795,10 @@ function refreshActivitySentences(actId, e) {
 
     currentMap[actId] = getBalancedSelection(availablePool, limit);
 
-    window.editingSavedSentencesMap = currentMap;
+    window.editingSavedSentencesMap = {
+        ...(window.editingSavedSentencesMap || {}),
+        ...currentMap
+    };
     renderPerActivitySentenceBoxes();
 
     const body = document.getElementById(`act-body-${actId}`);
@@ -1794,20 +1838,24 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
         return;
     }
 
+    if (!window.editingSavedSentencesMap || typeof window.editingSavedSentencesMap !== 'object') {
+        window.editingSavedSentencesMap = {};
+    }
+
     const isExplicitOverride = Boolean(overrideSentencesMap);
     if (isExplicitOverride) {
-        window.editingSavedSentencesMap = overrideSentencesMap;
+        window.editingSavedSentencesMap = { ...overrideSentencesMap };
     } else {
         const domMap = getCurrentSentencesMapFromDOM();
         if (Object.keys(domMap).length > 0) {
             window.editingSavedSentencesMap = {
-                ...(window.editingSavedSentencesMap || {}),
+                ...window.editingSavedSentencesMap,
                 ...domMap
             };
         }
     }
 
-    const savedMap = window.editingSavedSentencesMap || {};
+    const savedMap = window.editingSavedSentencesMap;
     const rawLimit = parseInt(document.getElementById('sentence-count')?.value, 10);
     const limit = (!isNaN(rawLimit) && rawLimit > 0) ? rawLimit : 10;
     const allSentences = getAssembledSentences();
