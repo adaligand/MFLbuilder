@@ -161,9 +161,30 @@ function updateActivityCategoryCounts(autoExpandChecked = false) {
     });
 }
 
+function hideSentenceTableCountControl() {
+    const tableCountSelect = document.getElementById('table-sentence-count');
+    if (!tableCountSelect) return;
+
+    const rowWrapper = tableCountSelect.parentElement;
+    if (rowWrapper && !rowWrapper.querySelector('#sentence-count')) {
+        rowWrapper.style.display = 'none';
+    } else {
+        tableCountSelect.style.display = 'none';
+        const lbl = document.querySelector('label[for="table-sentence-count"]');
+        if (lbl) lbl.style.display = 'none';
+    }
+}
+
 function ensureGroupedActivityList() {
+    hideSentenceTableCountControl();
+
     const container = document.getElementById('activity-list');
     if (!container) return;
+
+    // Remove any legacy Sentence Table checkbox row if present
+    const legacyStudyRow = container.querySelector('#chk-study')?.closest('.activity-row');
+    if (legacyStudyRow) legacyStudyRow.remove();
+
     if (document.getElementById('group-text-activities') && document.getElementById('group-audio-activities')) {
         return;
     }
@@ -184,12 +205,212 @@ function ensureGroupedActivityList() {
         row.style.minHeight = '0';
         const cb = row.querySelector('input[type="checkbox"]');
         const actId = cb ? cb.value : '';
+        if (actId === 'study') return;
         if (AUDIO_ACTIVITY_IDS.includes(actId)) {
             audioGroup.appendChild(row);
         } else {
             textGroup.appendChild(row);
         }
     });
+}
+
+/* =========================
+   SENTENCE LIST PREVIEW (WITH AMOUNT DROPDOWN, COPY & DOWNLOAD)
+========================= */
+window.previewAllSentences = [];
+window.previewDisplayedSentences = [];
+window.previewRenderSessionId = 0;
+
+function renderPreviewSentencesBatch(sentences) {
+    const modal = document.getElementById('preview-modal');
+    const content = document.getElementById('preview-content');
+    if (!content) return;
+
+    window.previewDisplayedSentences = sentences;
+    const sessionId = ++window.previewRenderSessionId;
+
+    if (!sentences || sentences.length === 0) {
+        content.innerHTML = "No content yet.";
+        return;
+    }
+
+    const renderChunk = (start, end) => {
+        let html = '';
+        for (let i = start; i < end; i++) {
+            const s = sentences[i];
+            html += `<div class="preview-sentence">${i + 1}. <b>${s.t}</b> <span class="tr-text">(${s.tr})</span></div>`;
+        }
+        return html;
+    };
+
+    const FIRST_BATCH = 300;
+    const firstEnd = Math.min(sentences.length, FIRST_BATCH);
+    content.innerHTML = renderChunk(0, firstEnd);
+
+    let cursor = firstEnd;
+    function appendNextBatch() {
+        if (sessionId !== window.previewRenderSessionId || cursor >= sentences.length || (modal && modal.style.display === 'none')) return;
+        const nextEnd = Math.min(sentences.length, cursor + 500);
+        content.insertAdjacentHTML('beforeend', renderChunk(cursor, nextEnd));
+        cursor = nextEnd;
+        if (cursor < sentences.length) {
+            requestAnimationFrame(appendNextBatch);
+        }
+    }
+
+    if (cursor < sentences.length) {
+        requestAnimationFrame(appendNextBatch);
+    }
+}
+
+function updatePreviewSentenceList() {
+    const all = window.previewAllSentences || [];
+    const countSelect = document.getElementById('preview-sentence-count');
+    const counterEl = document.getElementById('preview-sentence-counter');
+    const val = countSelect ? countSelect.value : 'all';
+
+    let subset = all;
+    if (val !== 'all') {
+        const limit = parseInt(val, 10);
+        if (!isNaN(limit) && limit > 0 && limit < all.length) {
+            subset = typeof getBalancedSelection === 'function'
+                ? getBalancedSelection(all, limit)
+                : all.slice(0, limit);
+        }
+    }
+
+    if (counterEl) {
+        if (all.length === 0) {
+            counterEl.textContent = '(0 sentences)';
+        } else if (subset.length < all.length) {
+            counterEl.textContent = `(${subset.length} of ${all.length} sentences)`;
+        } else {
+            counterEl.textContent = all.length === 1 ? '(1 sentence)' : `(${all.length} sentences)`;
+        }
+    }
+
+    renderPreviewSentencesBatch(subset);
+}
+
+function copyPreviewSentences(btnEl) {
+    const list = window.previewDisplayedSentences || [];
+    if (list.length === 0) {
+        alert("No sentences to copy.");
+        return;
+    }
+
+    // Tab-separated values (Target \t English) paste cleanly into 2 columns in Excel / Google Sheets
+    const tsv = list
+        .map(s => `${(s.t || '').replace(/[\t\r\n]+/g, ' ').trim()}\t${(s.tr || '').replace(/[\t\r\n]+/g, ' ').trim()}`)
+        .join('\n');
+
+    const showCopiedState = () => {
+        if (!btnEl) return;
+        const origHTML = btnEl.getAttribute('data-orig-html') || btnEl.innerHTML;
+        btnEl.setAttribute('data-orig-html', origHTML);
+        btnEl.innerHTML = '✅ Copied!';
+        btnEl.style.background = '#dcfce7';
+        btnEl.style.borderColor = '#86efac';
+        btnEl.style.color = '#166534';
+        clearTimeout(btnEl._copyTimer);
+        btnEl._copyTimer = setTimeout(() => {
+            btnEl.innerHTML = origHTML;
+            btnEl.style.background = '#f1f5f9';
+            btnEl.style.borderColor = '#cbd5e1';
+            btnEl.style.color = '#1e293b';
+        }, 2000);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(tsv).then(showCopiedState).catch(() => {
+            fallbackCopyText(tsv);
+            showCopiedState();
+        });
+    } else {
+        fallbackCopyText(tsv);
+        showCopiedState();
+    }
+}
+
+function fallbackCopyText(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+}
+
+function downloadPreviewSentenceTable() {
+    const list = window.previewDisplayedSentences || [];
+    if (list.length === 0) {
+        alert("No sentences to download.");
+        return;
+    }
+
+    const docTitle = document.getElementById('builder-title')?.value || "Sentence Builder";
+    const docLang = (typeof meta !== 'undefined' && meta.lang) || document.getElementById('meta-lang')?.value || "Target Language";
+    const docYear = (typeof meta !== 'undefined' && meta.year) || document.getElementById('meta-year')?.value || "";
+
+    const escapeHtml = str => String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    const rowsHtml = list.map(s =>
+        '<tr>' +
+            '<td style="padding:2pt 6pt; mso-para-margin:0pt;"><b>' + escapeHtml(s.t) + '</b></td>' +
+            '<td class="blue" style="padding:2pt 6pt; mso-para-margin:0pt;">' + escapeHtml(s.tr) + '</td>' +
+        '</tr>'
+    ).join('');
+
+    const subInfo = docYear ? `${escapeHtml(docLang)} | ${escapeHtml(docYear)}` : escapeHtml(docLang);
+
+    const contentHtml =
+        '<div class="header-block">' +
+            '<div class="doc-main-title">' + escapeHtml(docTitle).toUpperCase() + ' <span class="doc-sub-info">' + subInfo + '</span></div>' +
+        '</div>' +
+        '<table class="sentence-grid-table">' +
+            '<tr><th>' + escapeHtml(docLang) + '</th><th>English Translation</th></tr>' +
+            rowsHtml +
+        '</table>';
+
+    const fullDoc =
+        '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
+        '<head>' +
+        '<meta charset="utf-8">' +
+        '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->' +
+        '<style>' +
+            '@page { size: A4 portrait; margin: 2cm; } ' +
+            'body { font-family: "Segoe UI", Arial, sans-serif; font-size: 11pt; color: #1e293b; line-height: 1.3; } ' +
+            '.header-block { margin-bottom: 12pt; } ' +
+            '.doc-main-title { font-size: 15pt; font-weight: bold; text-transform: uppercase; color: #0f172a; } ' +
+            '.doc-sub-info { font-size: 10pt; font-weight: normal; text-transform: none; color: #64748b; margin-left: 8px; } ' +
+            '.sentence-grid-table { width: 100%; border-collapse: collapse; margin-top: 4pt; } ' +
+            '.sentence-grid-table th { border: 1px solid #cbd5e1; padding: 4pt 6pt; font-size: 10pt; background-color: #f1f5f9; text-align: left; font-weight: bold; } ' +
+            '.sentence-grid-table td { border: 1px solid #cbd5e1; padding: 2pt 6pt; font-size: 10pt; line-height: 1.15; } ' +
+            '.blue { color: #2980b9; font-style: italic; } ' +
+        '</style>' +
+        '</head>' +
+        '<body>' + contentHtml + '</body>' +
+        '</html>';
+
+    const blob = new Blob(['\ufeff', fullDoc], { type: 'application/msword' });
+    if (typeof saveAs === 'function') {
+        saveAs(blob, `${docTitle}_Sentence_Table.doc`);
+    } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${docTitle}_Sentence_Table.doc`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
 }
 
 function openPreview() {
@@ -199,7 +420,37 @@ function openPreview() {
     const titleEl = modal ? modal.querySelector('h3') : null;
 
     if (titleEl) {
-        titleEl.innerHTML = 'Sentence List Preview';
+        titleEl.style.display = 'flex';
+        titleEl.style.flexWrap = 'wrap';
+        titleEl.style.alignItems = 'center';
+        titleEl.style.gap = '8px';
+        titleEl.style.paddingRight = '32px';
+        titleEl.innerHTML = `
+            <span>Sentence List Preview</span>
+            <span id="preview-sentence-counter" style="font-size: 13px; font-weight: 600; color: #64748b;"></span>
+            <span onclick="event.stopPropagation()" style="display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; flex-wrap: wrap;">
+                <label style="display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: #334155; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 3px 8px; margin: 0;">
+                    <span>Sentences:</span>
+                    <select id="preview-sentence-count" onchange="updatePreviewSentenceList()" style="border: none; background: transparent; font-size: 12px; font-weight: 700; color: #1e293b; cursor: pointer; outline: none; padding: 0;">
+                        <option value="all" selected>All</option>
+                        <option value="10">10</option>
+                        <option value="15">15</option>
+                        <option value="20">20</option>
+                        <option value="25">25</option>
+                        <option value="30">30</option>
+                        <option value="40">40</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </label>
+                <button type="button" onclick="copyPreviewSentences(this)" title="Copy sentences (tab-separated for Excel)" style="padding: 4px 10px; font-size: 12px; font-weight: 600; background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer; margin: 0; line-height: 1.3;">
+                    📋 Copy
+                </button>
+                <button type="button" onclick="downloadPreviewSentenceTable()" title="Download Sentence Table (Word)" style="padding: 4px 10px; font-size: 12px; font-weight: 600; background: #2563eb; color: #ffffff; border: 1px solid #2563eb; border-radius: 6px; cursor: pointer; margin: 0; line-height: 1.3;">
+                    ⬇️ Download
+                </button>
+            </span>
+        `;
     }
     if (content) {
         content.innerHTML = '<div class="preview-sentence" style="color:#64748b;">⏳ Generating sentence list...</div>';
@@ -209,47 +460,8 @@ function openPreview() {
 
     requestAnimationFrame(() => {
         setTimeout(() => {
-            const sentences = getAssembledSentences();
-            if (!content) return;
-
-            if (titleEl) {
-                const countLabel = sentences.length === 1 ? '1 sentence' : `${sentences.length} sentences`;
-                titleEl.innerHTML = `Sentence List Preview <span style="font-size: 14px; font-weight: 600; color: #64748b; margin-left: 8px;">(${countLabel})</span>`;
-            }
-
-            if (!sentences || sentences.length === 0) {
-                content.innerHTML = "No content yet.";
-                return;
-            }
-
-            const renderChunk = (start, end) => {
-                let html = '';
-                for (let i = start; i < end; i++) {
-                    const s = sentences[i];
-                    html += `<div class="preview-sentence">${i + 1}. <b>${s.t}</b> <span class="tr-text">(${s.tr})</span></div>`;
-                }
-                return html;
-            };
-
-            const FIRST_BATCH = 300;
-            const firstEnd = Math.min(sentences.length, FIRST_BATCH);
-            content.innerHTML = renderChunk(0, firstEnd);
-
-            // Append remaining sentences smoothly across animation frames so all sentences appear without freezing
-            let cursor = firstEnd;
-            function appendNextBatch() {
-                if (cursor >= sentences.length || modal.style.display === 'none') return;
-                const nextEnd = Math.min(sentences.length, cursor + 500);
-                content.insertAdjacentHTML('beforeend', renderChunk(cursor, nextEnd));
-                cursor = nextEnd;
-                if (cursor < sentences.length) {
-                    requestAnimationFrame(appendNextBatch);
-                }
-            }
-
-            if (cursor < sentences.length) {
-                requestAnimationFrame(appendNextBatch);
-            }
+            window.previewAllSentences = getAssembledSentences() || [];
+            updatePreviewSentenceList();
         }, 0);
     });
 }
@@ -258,6 +470,8 @@ function openActivityMenu() {
     editingAssignmentId = null;
     window.editingSavedSentencesMap = null;
     window.duplicatingAssignmentLang = null;
+
+    hideSentenceTableCountControl();
 
     // Bind current editor state to assignment options modal
     activeAssignmentBuilderId = currentDocId || null;
@@ -276,7 +490,6 @@ function openActivityMenu() {
 
     const currentLang = meta.lang || document.getElementById('meta-lang')?.value || "Target Language";
     const list = [
-        {id:'study', label:'Sentence Table (Reference)'}, 
         {id:'match', label:'Match up'}, 
         {id:'nospaces', label:'No Spaces'}, 
         {id:'jumbled', label:'Unjumble'}, 
@@ -1148,9 +1361,7 @@ function refreshActivitySentences(actId, e) {
 
     const currentMap = getCurrentSentencesMapFromDOM();
 
-    const isStudy = (actId === 'study');
-    const countSelectId = isStudy ? 'table-sentence-count' : 'sentence-count';
-    const limit = parseInt(document.getElementById(countSelectId)?.value || 10, 10);
+    const limit = parseInt(document.getElementById('sentence-count')?.value || 10, 10);
     const allSentences = getAssembledSentences();
 
     let availablePool = [...allSentences];
@@ -1196,8 +1407,7 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
     }
 
     const savedMap = window.editingSavedSentencesMap || null;
-    const defaultExerciseLimit = parseInt(document.getElementById('sentence-count')?.value || 10, 10);
-    const tableLimit = parseInt(document.getElementById('table-sentence-count')?.value || 10, 10);
+    const limit = parseInt(document.getElementById('sentence-count')?.value || 10, 10);
     const allSentences = getAssembledSentences();
 
     let html = '';
@@ -1205,10 +1415,9 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
 
     checkedBoxes.forEach((cb) => {
         const actId = cb.value;
-        const actLabel = document.querySelector(`label[for="${cb.id}"]`)?.innerText || actId;
-        const isStudy = (actId === 'study');
-        const limit = isStudy ? tableLimit : defaultExerciseLimit;
+        if (actId === 'study') return;
 
+        const actLabel = document.querySelector(`label[for="${cb.id}"]`)?.innerText || actId;
         let actSents = [];
 
         if (savedMap && savedMap[actId] && savedMap[actId].length > 0) {
@@ -1231,9 +1440,7 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
             }
         }
 
-        if (!isStudy) {
-            actSents.forEach(s => { if (s && s.t) usedSentenceTexts.add(s.t.trim()); });
-        }
+        actSents.forEach(s => { if (s && s.t) usedSentenceTexts.add(s.t.trim()); });
         const usedGapWords = new Set();
 
         if ((actId === 'faulty' || actId === 'listen-faulty') && actSents.length === 0) {
@@ -1361,7 +1568,7 @@ function toggleActivityCollapse(actId) {
    WORKSHEET GENERATOR
 ========================= */
 function generateWorksheet() {
-    var activityOrder = ['study', 'match', 'nospaces', 'jumbled', 'gap-en', 'gap-t', 'vowels', 'cons', 'faulty', 'trans-en', 'trans-target'];
+    var activityOrder = ['match', 'nospaces', 'jumbled', 'gap-en', 'gap-t', 'vowels', 'cons', 'faulty', 'trans-en', 'trans-target'];
     
     var docTitle = document.getElementById('builder-title')?.value || "Sentence Builder";
     var docLang = meta.lang || document.getElementById('meta-lang')?.value || "Target Language";
@@ -1386,7 +1593,7 @@ function generateWorksheet() {
         return el && el.checked && !['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying', 'listen-missing', 'listen-faulty', 'listen-jumbled'].includes(id);
     });
     
-    if (selected.length === 0) return alert("Select at least one activity!");
+    if (selected.length === 0) return alert("Select at least one printable activity!");
 
     var allSentences = getAssembledSentences();
     if (allSentences.length === 0) return alert("No sentences found!");
@@ -1411,11 +1618,10 @@ function generateWorksheet() {
         var rawLabel = labelEl ? labelEl.innerText : type;
         var cleanLabel = rawLabel.replace(/\bTL\b/g, docLang).replace(/Target Language/gi, docLang);
 
-        var isStudy = (type === 'study');
-        var boxTitle = isStudy ? "Sentence Table" : ("Exercise " + exerciseCounter + ": " + cleanLabel);
-        if (!isStudy) exerciseCounter++;
+        var boxTitle = "Exercise " + exerciseCounter + ": " + cleanLabel;
+        exerciseCounter++;
 
-        var textInstruction = isStudy ? "" : (activityInstructions[type] || "");
+        var textInstruction = activityInstructions[type] || "";
         var instructionMarkup = textInstruction ? ('<div class="ex-instruction">' + textInstruction + '</div>') : '';
 
         var activityHtml = 
@@ -1430,54 +1636,38 @@ function generateWorksheet() {
                 '</table>';
 
         var currentSents = [];
-        if (isStudy) {
-            var tableCountDropdown = document.getElementById('table-sentence-count');
-            var tableLimit = tableCountDropdown ? parseInt(tableCountDropdown.value, 10) : 10;
-            currentSents = getBalancedSelection(allSentences, tableLimit);
-        } else {
-            var bodyEl = document.getElementById('act-body-' + type);
-            if (bodyEl) {
-                var rows = bodyEl.querySelectorAll('.act-sentence-row');
-                var targets = rows.length > 0 ? rows : bodyEl.children;
-                Array.from(targets).forEach(function(row) {
-                    var tInput = row.querySelector('.edit-t');
-                    var trInput = row.querySelector('.edit-tr');
-                    var faultyTrInput = row.querySelector('.edit-faulty-tr');
-                    if (tInput) {
-                        var t = tInput.value.trim();
-                        var tr = trInput ? trInput.value.trim() : "";
-                        var faultyTr = faultyTrInput ? faultyTrInput.value.trim() : "";
-                        if (t || tr) {
-                            var itemObj = { t: t, tr: tr };
-                            if (type === 'faulty' && faultyTr) {
-                                itemObj.faultyTr = faultyTr;
-                            }
-                            currentSents.push(itemObj);
+        var bodyEl = document.getElementById('act-body-' + type);
+        if (bodyEl) {
+            var rows = bodyEl.querySelectorAll('.act-sentence-row');
+            var targets = rows.length > 0 ? rows : bodyEl.children;
+            Array.from(targets).forEach(function(row) {
+                var tInput = row.querySelector('.edit-t');
+                var trInput = row.querySelector('.edit-tr');
+                var faultyTrInput = row.querySelector('.edit-faulty-tr');
+                if (tInput) {
+                    var t = tInput.value.trim();
+                    var tr = trInput ? trInput.value.trim() : "";
+                    var faultyTr = faultyTrInput ? faultyTrInput.value.trim() : "";
+                    if (t || tr) {
+                        var itemObj = { t: t, tr: tr };
+                        if (type === 'faulty' && faultyTr) {
+                            itemObj.faultyTr = faultyTr;
                         }
+                        currentSents.push(itemObj);
                     }
-                });
-            }
-            if (currentSents.length === 0) {
-                var countDropdown = document.getElementById('sentence-count');
-                var chosenLimit = countDropdown ? parseInt(countDropdown.value, 10) : 10;
-                currentSents = getBalancedSelection(allSentences, chosenLimit);
-            }
+                }
+            });
+        }
+        if (currentSents.length === 0) {
+            var countDropdown = document.getElementById('sentence-count');
+            var chosenLimit = countDropdown ? parseInt(countDropdown.value, 10) : 10;
+            currentSents = getBalancedSelection(allSentences, chosenLimit);
         }
 
-        var activityAnswersHtml = "";
-        if (!isStudy) {
-            activityAnswersHtml += '<div class="ak-group"><h3>' + boxTitle + '</h3><ol class="answer-list">';
-        }
-
+        var activityAnswersHtml = '<div class="ak-group"><h3>' + boxTitle + '</h3><ol class="answer-list">';
         var usedGapWords = new Set();
 
-        if (type === 'study') {
-            activityHtml += '<table class="sentence-grid-table"><tr><th>' + docLang + '</th><th>English Translation</th></tr>';
-            currentSents.forEach(function(s) {
-                activityHtml += '<tr><td style="padding:1pt 5pt; mso-para-margin:0pt;"><b>' + s.t + '</b></td><td class="blue" style="padding:1pt 5pt; mso-para-margin:0pt;">' + s.tr + '</td></tr>';
-            });
-            activityHtml += '</table>';
-        } else if (type === 'match') {
+        if (type === 'match') {
             var shuf = shuffleArray(currentSents);
             activityHtml += '<table class="match-table">';
             currentSents.forEach(function(s, i) {
@@ -1575,10 +1765,8 @@ function generateWorksheet() {
         activityHtml += '</div>';
         contentHtml += activityHtml;
 
-        if (!isStudy) {
-            activityAnswersHtml += '</ol></div>';
-            answerKeyHtml += activityAnswersHtml;
-        }
+        activityAnswersHtml += '</ol></div>';
+        answerKeyHtml += activityAnswersHtml;
     });
 
     answerKeyHtml += '</div>'; 
@@ -1611,10 +1799,6 @@ function generateWorksheet() {
             '.exercise-title-table td { background-color: #f8fafc; border-left: 4px solid #8b5cf6; border-top: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; padding: 6pt 10pt; mso-para-margin: 0pt !important; } ' +
             '.ex-title { font-size: 12pt; font-weight: bold; color: #1e293b; margin: 0; padding: 0; mso-para-margin: 0pt !important; } ' +
             '.ex-instruction { font-size: 10pt; font-style: italic; color: #64748b; margin-top: 3pt; padding: 0; mso-para-margin: 0pt !important; } ' +
-
-            '.sentence-grid-table { width: 100%; border-collapse: collapse; margin-top: 2pt; margin-bottom: 8pt; } ' +
-            '.sentence-grid-table th { border: 1px solid #cbd5e1; padding: 2pt 5pt !important; font-size: 10pt !important; background-color: #f1f5f9; text-align: left; font-weight: bold; mso-para-margin: 0pt !important; mso-space-above: 0pt !important; mso-space-below: 0pt !important; } ' +
-            '.sentence-grid-table td { border: 1px solid #cbd5e1; padding: 1pt 5pt !important; font-size: 10pt !important; line-height: 1.1 !important; mso-para-margin: 0pt !important; mso-space-above: 0pt !important; mso-space-below: 0pt !important; } ' +
 
             '.activity-container { page-break-inside: avoid; margin-bottom: 16pt; } ' +
             '.exercise-item-wrapper { margin-bottom: 14pt; page-break-inside: avoid; } ' +
@@ -1711,7 +1895,9 @@ async function publishTaskToClassroom() {
 
     if (!courseId) return alert("Select a Google Classroom course.");
 
-    const selectedActivities = Array.from(document.querySelectorAll('#activity-list input[type="checkbox"]:checked')).map(c => c.value);
+    const selectedActivities = Array.from(document.querySelectorAll('#activity-list input[type="checkbox"]:checked'))
+        .map(c => c.value)
+        .filter(id => id !== 'study');
     if (selectedActivities.length === 0) return alert("Select at least one activity!");
 
     const listenTradGapLevel = selectedActivities.includes('listen-trad')
@@ -1733,7 +1919,6 @@ async function publishTaskToClassroom() {
         'delayed-dictation': delayedDictationGapLevel,
         'delayed-copying': delayedCopyingGapLevel
     };
-    const tableLimit = parseInt(document.getElementById('table-sentence-count').value, 10);
     const allSentences = getAssembledSentences();
 
     const structuredSentencesPerActivity = {};
@@ -1766,26 +1951,18 @@ async function publishTaskToClassroom() {
 
         if (sents.length > 0) {
             structuredSentencesPerActivity[actId] = sents;
-            if (actId !== 'study') {
-                totalSentencesCount += sents.length;
-            }
+            totalSentencesCount += sents.length;
         } else if (window.editingSavedSentencesMap && window.editingSavedSentencesMap[actId] && window.editingSavedSentencesMap[actId].length > 0) {
             // Preserve exact duplicated sentences without re-shuffling from grid
             structuredSentencesPerActivity[actId] = window.editingSavedSentencesMap[actId];
-            if (actId !== 'study') {
-                totalSentencesCount += window.editingSavedSentencesMap[actId].length;
-            }
+            totalSentencesCount += window.editingSavedSentencesMap[actId].length;
         } else {
-            if (actId === 'study') {
-                structuredSentencesPerActivity['study'] = getBalancedSelection(allSentences, tableLimit);
-            } else {
-                const exerciseLimit = parseInt(document.getElementById('sentence-count').value, 10);
-                const pool = (actId === 'faulty' || actId === 'listen-faulty')
-                    ? allSentences.filter(isEligibleForFaulty)
-                    : allSentences;
-                structuredSentencesPerActivity[actId] = getBalancedSelection(pool, exerciseLimit);
-                totalSentencesCount += structuredSentencesPerActivity[actId].length;
-            }
+            const exerciseLimit = parseInt(document.getElementById('sentence-count').value, 10);
+            const pool = (actId === 'faulty' || actId === 'listen-faulty')
+                ? allSentences.filter(isEligibleForFaulty)
+                : allSentences;
+            structuredSentencesPerActivity[actId] = getBalancedSelection(pool, exerciseLimit);
+            totalSentencesCount += structuredSentencesPerActivity[actId].length;
         }
     });
 
@@ -1944,3 +2121,5 @@ async function publishTaskToClassroom() {
     alert(gcScheduledTime ? "📅 Assignment scheduled for publication on Google Classroom!" : "🎉 Assignment successfully posted to Google Classroom!");
     closeModals();
 }
+
+document.addEventListener('DOMContentLoaded', hideSentenceTableCountControl);
