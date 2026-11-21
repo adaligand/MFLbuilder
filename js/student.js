@@ -3,6 +3,201 @@
 ========================= */
 const STUDENT_MULTI_GAP_ACTIVITIES = ['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'];
 
+/* =========================
+   STUDENT ACTIVE TIME TRACKER
+========================= */
+window.studentTimeTracker = window.studentTimeTracker || {
+    assignmentId: null,
+    studentEmail: null,
+    elapsedSeconds: 0,
+    startedAt: null,
+    lastTickMs: null,
+    intervalId: null,
+    lastPersistedSec: 0,
+    listenersAttached: false
+};
+
+function getStudentTimeStorageKey(assignmentId, email) {
+    const safeAssign = assignmentId || 'unknown';
+    const safeEmail = (email || (typeof currentUser !== 'undefined' && currentUser?.email) || 'guest').toLowerCase();
+    return `student_time_${safeAssign}_${safeEmail}`;
+}
+
+function formatStudentDuration(totalSeconds) {
+    const rounded = Math.max(1, Math.round(totalSeconds || 0));
+    const hours = Math.floor(rounded / 3600);
+    const mins = Math.floor((rounded % 3600) / 60);
+    const secs = rounded % 60;
+
+    if (hours > 0) {
+        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    }
+    if (mins > 0) {
+        return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+    }
+    return `${secs}s`;
+}
+
+function flushStudentTimeDelta() {
+    const tracker = window.studentTimeTracker;
+    if (!tracker || !tracker.assignmentId || window.isTeacherPreview) return;
+
+    const now = Date.now();
+    const exCard = document.getElementById('student-active-exercise-card');
+    const isActivelyWorking = document.visibilityState === 'visible'
+        && exCard
+        && exCard.style.display !== 'none';
+
+    if (isActivelyWorking && tracker.lastTickMs) {
+        const deltaSec = (now - tracker.lastTickMs) / 1000;
+        if (deltaSec > 0 && deltaSec <= 5) {
+            tracker.elapsedSeconds += deltaSec;
+        }
+    }
+    tracker.lastTickMs = isActivelyWorking ? now : null;
+}
+
+function persistStudentTimeSnapshot(syncFirestore = false) {
+    const tracker = window.studentTimeTracker;
+    if (!tracker || !tracker.assignmentId || window.isTeacherPreview) return;
+
+    const roundedSec = Math.round(tracker.elapsedSeconds);
+    const storageKey = getStudentTimeStorageKey(tracker.assignmentId, tracker.studentEmail);
+
+    try {
+        localStorage.setItem(storageKey, JSON.stringify({
+            elapsedSeconds: roundedSec,
+            startedAt: tracker.startedAt,
+            updatedAt: Date.now()
+        }));
+    } catch (e) {}
+
+    if (syncFirestore && tracker.studentEmail && typeof db !== 'undefined') {
+        const draftId = `${tracker.assignmentId}_${tracker.studentEmail}`;
+        db.collection("drafts").doc(draftId).set({
+            timeSpentSeconds: roundedSec,
+            startedAt: tracker.startedAt || new Date().toISOString()
+        }, { merge: true }).catch(() => {});
+    }
+}
+
+function attachStudentTimeLifecycleListeners() {
+    const tracker = window.studentTimeTracker;
+    if (tracker.listenersAttached) return;
+    tracker.listenersAttached = true;
+
+    document.addEventListener('visibilitychange', () => {
+        if (!tracker.assignmentId || window.isTeacherPreview) return;
+        if (document.visibilityState === 'hidden') {
+            flushStudentTimeDelta();
+            tracker.lastTickMs = null;
+            persistStudentTimeSnapshot(true);
+        } else if (document.visibilityState === 'visible') {
+            tracker.lastTickMs = Date.now();
+        }
+    });
+
+    window.addEventListener('pagehide', () => {
+        if (!tracker.assignmentId || window.isTeacherPreview) return;
+        flushStudentTimeDelta();
+        persistStudentTimeSnapshot(false);
+    });
+
+    window.addEventListener('beforeunload', () => {
+        if (!tracker.assignmentId || window.isTeacherPreview) return;
+        flushStudentTimeDelta();
+        persistStudentTimeSnapshot(false);
+    });
+}
+
+function stopStudentTimeTracker(clearStorage = false) {
+    const tracker = window.studentTimeTracker;
+    flushStudentTimeDelta();
+
+    if (tracker.intervalId) {
+        clearInterval(tracker.intervalId);
+        tracker.intervalId = null;
+    }
+
+    const finalSeconds = Math.max(1, Math.round(tracker.elapsedSeconds || 0));
+
+    if (clearStorage && tracker.assignmentId) {
+        try {
+            localStorage.removeItem(getStudentTimeStorageKey(tracker.assignmentId, tracker.studentEmail));
+            localStorage.removeItem(getStudentTimeStorageKey(tracker.assignmentId, 'guest'));
+        } catch (e) {}
+    } else if (tracker.assignmentId) {
+        persistStudentTimeSnapshot(false);
+    }
+
+    tracker.lastTickMs = null;
+    if (clearStorage) {
+        tracker.assignmentId = null;
+        tracker.studentEmail = null;
+        tracker.elapsedSeconds = 0;
+        tracker.startedAt = null;
+        tracker.lastPersistedSec = 0;
+    }
+
+    return finalSeconds;
+}
+
+function startStudentTimeTracker(assignmentId, studentEmail = null, initialSeconds = 0, existingStartedAt = null) {
+    stopStudentTimeTracker(false);
+    if (window.isTeacherPreview || !assignmentId) return;
+
+    attachStudentTimeLifecycleListeners();
+
+    const normalizedEmail = (studentEmail || (typeof currentUser !== 'undefined' && currentUser?.email) || '').toLowerCase() || null;
+    let bestElapsed = Number(initialSeconds) || 0;
+    let startedAt = existingStartedAt || null;
+
+    // Check localStorage for any previously saved time (including pre-login guest time)
+    const keysToCheck = [getStudentTimeStorageKey(assignmentId, normalizedEmail)];
+    if (normalizedEmail) {
+        keysToCheck.push(getStudentTimeStorageKey(assignmentId, 'guest'));
+    }
+
+    keysToCheck.forEach(key => {
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (typeof parsed.elapsedSeconds === 'number' && parsed.elapsedSeconds > bestElapsed) {
+                    bestElapsed = parsed.elapsedSeconds;
+                }
+                if (!startedAt && parsed.startedAt) {
+                    startedAt = parsed.startedAt;
+                }
+            }
+        } catch (e) {}
+    });
+
+    if (!startedAt) {
+        startedAt = new Date().toISOString();
+    }
+
+    const tracker = window.studentTimeTracker;
+    tracker.assignmentId = assignmentId;
+    tracker.studentEmail = normalizedEmail;
+    tracker.elapsedSeconds = bestElapsed;
+    tracker.startedAt = startedAt;
+    tracker.lastTickMs = (document.visibilityState === 'visible') ? Date.now() : null;
+    tracker.lastPersistedSec = Math.round(bestElapsed);
+
+    persistStudentTimeSnapshot(false);
+
+    tracker.intervalId = setInterval(() => {
+        if (!tracker.assignmentId || window.isTeacherPreview) return;
+        flushStudentTimeDelta();
+        const currentRounded = Math.round(tracker.elapsedSeconds);
+        if (currentRounded - tracker.lastPersistedSec >= 5) {
+            tracker.lastPersistedSec = currentRounded;
+            persistStudentTimeSnapshot(false);
+        }
+    }, 1000);
+}
+
 function getCleanActivityTitle(type, lang) {
     const map = {
         'study': 'Sentence Table (Reference)',
@@ -100,6 +295,7 @@ function getActivityInstruction(type, lang) {
 
 async function loadStudentTask(assignmentId) {
     window.isTeacherPreview = false;
+    stopStudentTimeTracker(false);
     const previewBanner = document.getElementById('teacher-preview-banner');
     if (previewBanner) previewBanner.style.display = 'none';
 
@@ -143,8 +339,12 @@ async function loadStudentTask(assignmentId) {
             if (refBanner) refBanner.style.display = 'none';
         }
 
+        let restoredTimeSeconds = 0;
+        let restoredStartedAt = null;
+        let studentEmail = null;
+
         if (currentUser && currentUser.email) {
-            const studentEmail = currentUser.email.toLowerCase();
+            studentEmail = currentUser.email.toLowerCase();
 
             // 1. Check if final submission already exists
             try {
@@ -185,12 +385,19 @@ async function loadStudentTask(assignmentId) {
                     try {
                         const localDraft = JSON.parse(localDraftRaw);
                         if (!draftData || (localDraft.updatedAt || 0) > (draftData.updatedAt || 0)) {
-                            draftData = localDraft;
+                            draftData = { ...(draftData || {}), ...localDraft };
                         }
                     } catch (pErr) {}
                 }
 
                 if (draftData) {
+                    if (typeof draftData.timeSpentSeconds === 'number' && draftData.timeSpentSeconds > 0) {
+                        restoredTimeSeconds = draftData.timeSpentSeconds;
+                    }
+                    if (draftData.startedAt) {
+                        restoredStartedAt = draftData.startedAt;
+                    }
+
                     studentAnswersState = draftData.studentAnswersState || {};
                     const restoredCompleted = draftData.studentCompletedExercises || {};
                     window.studentCompletedExercises = {};
@@ -249,6 +456,7 @@ async function loadStudentTask(assignmentId) {
         if (exCard) exCard.style.display = 'block';
         if (navActions) navActions.style.display = 'flex';
 
+        startStudentTimeTracker(assignmentId, studentEmail, restoredTimeSeconds, restoredStartedAt);
         renderCurrentStudentExercise();
     } catch (err) {
         console.error("Critical Error Loading Task:", err);
@@ -257,6 +465,7 @@ async function loadStudentTask(assignmentId) {
 }
 
 function renderStudentPendingReviewCard(sub) {
+    stopStudentTimeTracker(false);
     document.getElementById('student-active-exercise-card').style.display = 'none';
     document.getElementById('student-nav-actions').style.display = 'none';
     document.getElementById('virtual-keyboard-bar').style.display = 'none';
@@ -309,6 +518,7 @@ function renderStudentPendingReviewCard(sub) {
 }
 
 function renderStudentMarksheetReview(sub) {
+    stopStudentTimeTracker(false);
     document.getElementById('student-active-exercise-card').style.display = 'none';
     document.getElementById('student-nav-actions').style.display = 'none';
     document.getElementById('virtual-keyboard-bar').style.display = 'none';
@@ -523,6 +733,8 @@ async function submitCurrentExercise() {
     saveStudentCurrentExerciseResponses();
     window.studentCompletedExercises[actType] = true;
     await saveDraftProgress({ immediate: true });
+    flushStudentTimeDelta();
+    persistStudentTimeSnapshot(true);
     lockCurrentExerciseUI();
 
     if (innerSubmitBtn) innerSubmitBtn.style.display = 'none';
@@ -1489,6 +1701,8 @@ function navigateOneByOneItem(direction) {
 
     if (!window.isTeacherPreview) {
         saveDraftProgress({ immediate: false });
+        flushStudentTimeDelta();
+        persistStudentTimeSnapshot(false);
     }
     renderCurrentStudentExercise();
 }
@@ -2187,6 +2401,8 @@ function nextStudentExercise() {
     saveStudentCurrentExerciseResponses();
     if (!window.isTeacherPreview) {
         saveDraftProgress();
+        flushStudentTimeDelta();
+        persistStudentTimeSnapshot(true);
     }
     if (studentCurrentExIndex < studentExerciseTypes.length - 1) {
         studentCurrentExIndex++;
@@ -2221,6 +2437,10 @@ async function submitStudentWork() {
 
     saveStudentCurrentExerciseResponses();
 
+    const startedAtIso = window.studentTimeTracker?.startedAt || null;
+    const finalTimeSpentSeconds = stopStudentTimeTracker(false);
+    const formattedTimeSpent = formatStudentDuration(finalTimeSpentSeconds);
+
     let earned = 0;
     let possible = 0;
     const detailedReport = [];
@@ -2251,12 +2471,18 @@ async function submitStudentWork() {
         overallGrade: earned,
         percentage: pct,
         detailedReport: detailedReport,
+        timeSpentSeconds: finalTimeSpentSeconds,
+        timeSpent: formattedTimeSpent,
+        startedAt: startedAtIso,
         isReviewed: false,
         submittedAt: firebase.firestore.FieldValue.serverTimestamp()
     };
 
     try {
         await db.collection("submissions").add(subData);
+
+        // Clear tracked time storage now that submission is safely written
+        stopStudentTimeTracker(true);
 
         // Cancel any queued 1.5s auto-save BEFORE deleting so it doesn't recreate the draft
         cancelPendingDraftSave();
