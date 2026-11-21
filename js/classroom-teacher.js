@@ -482,14 +482,81 @@ async function downloadActiveAssignmentWorksheet() {
 /* =========================
    TEACHER SUBMISSIONS DASHBOARD & EDITING
 ========================= */
+function ensureSubmissionsTimeHeader() {
+    const tbody = document.getElementById('submissions-table-body');
+    const table = tbody ? tbody.closest('table') : null;
+    const headerRow = table ? table.querySelector('thead tr') : null;
+    if (!headerRow || headerRow.querySelector('#th-time-spent')) return;
+
+    const headers = Array.from(headerRow.children);
+    if (headers.some(th => /time\s*spent/i.test(th.textContent || ''))) return;
+
+    const th = document.createElement('th');
+    th.id = 'th-time-spent';
+    th.textContent = 'Time Spent';
+
+    const commentTh = headers.find(el => /comment|feedback/i.test(el.textContent || ''));
+    const overrideTh = headers.find(el => /override/i.test(el.textContent || ''));
+
+    if (commentTh) {
+        headerRow.insertBefore(th, commentTh);
+    } else if (overrideTh && overrideTh.nextSibling) {
+        headerRow.insertBefore(th, overrideTh.nextSibling);
+    } else {
+        headerRow.appendChild(th);
+    }
+}
+
+function formatStudentTimeSpent(sub) {
+    if (!sub) return '<span style="color:#94a3b8;">—</span>';
+
+    if (typeof sub.timeSpent === 'string' && sub.timeSpent.trim() !== '') {
+        return sub.timeSpent.trim();
+    }
+
+    let totalSeconds = null;
+    if (typeof sub.timeSpentSeconds === 'number' && !isNaN(sub.timeSpentSeconds)) {
+        totalSeconds = sub.timeSpentSeconds;
+    } else if (typeof sub.totalTimeSpentSeconds === 'number' && !isNaN(sub.totalTimeSpentSeconds)) {
+        totalSeconds = sub.totalTimeSpentSeconds;
+    } else if (typeof sub.activeTimeSeconds === 'number' && !isNaN(sub.activeTimeSeconds)) {
+        totalSeconds = sub.activeTimeSeconds;
+    } else if (typeof sub.durationSeconds === 'number' && !isNaN(sub.durationSeconds)) {
+        totalSeconds = sub.durationSeconds;
+    } else if (typeof sub.timeSpentMs === 'number' && !isNaN(sub.timeSpentMs)) {
+        totalSeconds = Math.round(sub.timeSpentMs / 1000);
+    } else if (typeof sub.totalTimeSpentMs === 'number' && !isNaN(sub.totalTimeSpentMs)) {
+        totalSeconds = Math.round(sub.totalTimeSpentMs / 1000);
+    }
+
+    if (totalSeconds === null || totalSeconds < 0) {
+        return '<span style="color:#94a3b8;">—</span>';
+    }
+
+    const rounded = Math.max(1, Math.round(totalSeconds));
+    const hours = Math.floor(rounded / 3600);
+    const mins = Math.floor((rounded % 3600) / 60);
+    const secs = rounded % 60;
+
+    if (hours > 0) {
+        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    }
+    if (mins > 0) {
+        return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+    }
+    return `${secs}s`;
+}
+
 async function loadTeacherSubmissions() {
+    ensureSubmissionsTimeHeader();
+
     const courseSelect = document.getElementById('sub-filter-course');
     const assignSelect = document.getElementById('sub-filter-assignment');
     const tbody = document.getElementById('submissions-table-body');
     const infoBanner = document.getElementById('active-assignment-info');
 
     if (infoBanner) infoBanner.style.display = 'none';
-    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#64748b;">Select a course and assignment to view grades.</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b;">Select a course and assignment to view grades.</td></tr>`;
 
     if (courseSelect) {
         courseSelect.innerHTML = '<option value="">Loading courses...</option>';
@@ -527,12 +594,14 @@ async function loadTeacherSubmissions() {
 }
 
 async function loadCourseAssignments(courseId) {
+    ensureSubmissionsTimeHeader();
+
     const assignSelect = document.getElementById('sub-filter-assignment');
     const infoBanner = document.getElementById('active-assignment-info');
     const tbody = document.getElementById('submissions-table-body');
 
     if (infoBanner) infoBanner.style.display = 'none';
-    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#64748b;">Select an assignment to view grades.</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b;">Select an assignment to view grades.</td></tr>`;
 
     if (!courseId) {
         if (assignSelect) {
@@ -593,13 +662,15 @@ async function loadCourseAssignments(courseId) {
 }
 
 async function renderStudentSubmissionsTable() {
+    ensureSubmissionsTimeHeader();
+
     const assignmentId = document.getElementById('sub-filter-assignment').value;
     const tbody = document.getElementById('submissions-table-body');
     const infoBanner = document.getElementById('active-assignment-info');
 
     if (!assignmentId) {
         if (infoBanner) infoBanner.style.display = 'none';
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#64748b;">Select an assignment to view grades.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b;">Select an assignment to view grades.</td></tr>`;
         return;
     }
 
@@ -644,7 +715,7 @@ async function renderStudentSubmissionsTable() {
         if (counterBadge) counterBadge.innerText = `📥 ${subCount} Submitted`;
 
         if (snap.empty) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#64748b; padding:20px;">No student submissions found for this task yet.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b; padding:20px;">No student submissions found for this task yet.</td></tr>`;
             return;
         }
 
@@ -665,6 +736,7 @@ async function renderStudentSubmissionsTable() {
                         <input type="number" id="grade-${subId}" value="${sub.overallGrade !== undefined ? sub.overallGrade : sub.totalEarned}" style="width:50px; padding:4px;"> 
                         / <input type="number" id="possible-${subId}" value="${sub.totalPossible}" style="width:50px; padding:4px;">
                     </td>
+                    <td style="white-space:nowrap; font-weight:600; color:#334155;">${formatStudentTimeSpent(sub)}</td>
                     <td><input type="text" id="comment-${subId}" value="${sub.teacherComment || ''}" style="width:100%; padding:4px;"></td>
                     <td>
                         <div style="display:flex; gap:6px; align-items:center;">
