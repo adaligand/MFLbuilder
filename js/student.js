@@ -344,25 +344,29 @@ function renderStudentMarksheetReview(sub) {
                         Exercise ${actIdx + 1}: ${act.activityTitle}
                     </div>
                     <div style="padding:12px;">
-                        ${(act.responses || []).map((r, i) => `
+                        ${(act.responses || []).map((r, i) => {
+                            const itemPoints = r.points !== undefined ? r.points : (r.isCorrect ? 1 : 0);
+                            const showMistakeBadge = r.mistakes !== undefined && (r.mistakes > 0 || itemPoints > 0);
+                            return `
                             <div style="padding:8px 0; border-bottom:1px solid #f1f5f9; display:flex; justify-content:space-between; align-items:center;">
                                 <div style="flex:1;">
                                     <div><b>${i + 1}. Prompt:</b> ${r.prompt}</div>
-                                    <div style="color:${r.points >= 1 ? '#10b981' : (r.points > 0 ? '#d97706' : '#ef4444')}; margin-top:2px;">
+                                    <div style="color:${itemPoints >= 1 ? '#10b981' : (itemPoints > 0 ? '#d97706' : '#ef4444')}; margin-top:2px;">
                                         <b>Your Answer:</b> ${r.studentAnswer}
-                                        ${r.mistakes !== undefined ? `
+                                        ${showMistakeBadge ? `
                                             <span style="display:inline-block; margin-left:8px; font-size:11px; padding:2px 6px; border-radius:4px; font-weight:bold; background:${r.mistakes === 0 ? '#d1fae5' : '#fef3c7'}; color:${r.mistakes === 0 ? '#065f46' : '#92400e'};">
                                                 ${r.mistakes === 0 ? '✓' : `⚠️ ${r.mistakes} Mistake(s)`}
                                             </span>
                                         ` : ''}
                                     </div>
-                                    ${r.points < 1 ? `<div style="color:#2563eb; font-weight:bold; font-size:13px; margin-top:3px;"><b>Correct Answer:</b> ${r.correctAnswer}</div>` : ''}
+                                    ${itemPoints < 1 ? `<div style="color:#2563eb; font-weight:bold; font-size:13px; margin-top:3px;"><b>Correct Answer:</b> ${r.correctAnswer}</div>` : ''}
                                 </div>
-                                <div style="font-weight:bold; color:${r.points >= 1 ? '#10b981' : (r.points > 0 ? '#d97706' : '#ef4444')}; padding-left:10px;">
-                                    ${r.points !== undefined ? r.points : (r.isCorrect ? 1 : 0)} / 1 pt
+                                <div style="font-weight:bold; color:${itemPoints >= 1 ? '#10b981' : (itemPoints > 0 ? '#d97706' : '#ef4444')}; padding-left:10px;">
+                                    ${itemPoints} / 1 pt
                                 </div>
                             </div>
-                        `).join('')}
+                        `;
+                        }).join('')}
                     </div>
                 </div>
             `;
@@ -994,11 +998,11 @@ function renderCurrentStudentExercise() {
             const makeSlotHTML = (slotIdx) => {
                 if (isAlreadySolved) {
                     if (slotIdx === removedIdx) {
-                        return `<span style="display:inline-block; padding:2px 10px; margin:0 5px; background:#dcfce7; border:2px solid #10b981; border-radius:6px; color:#065f46; font-weight:700;">${removedWord}</span>`;
+                        return `<span style="display:inline-block; padding:2px 10px; margin:0 2px; background:#dcfce7; border:2px solid #10b981; border-radius:6px; color:#065f46; font-weight:700;">${removedWord}</span>`;
                     }
                     return '';
                 }
-                return `<span class="missing-detail-slot" data-slot-idx="${slotIdx}" title="Click if the missing word belongs here" style="display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border:2px solid #8b5cf6; border-radius:5px; background:#f5f3ff; cursor:pointer; vertical-align:middle; margin:0 6px; transition:all 0.15s ease;"></span>`;
+                return `<span class="missing-detail-slot" data-slot-idx="${slotIdx}" title="Click if the missing word belongs here" style="display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border:2px solid #8b5cf6; border-radius:5px; background:#f5f3ff; cursor:pointer; vertical-align:middle; margin:0 2px; transition:all 0.15s ease;"></span>`;
             };
 
             let sentenceWithSlotsHTML = makeSlotHTML(0);
@@ -1015,7 +1019,7 @@ function renderCurrentStudentExercise() {
                     data-removed-word="${removedWord.replace(/"/g, '&quot;')}"
                     style="text-align:center; padding:16px 0;">
                     <button type="button" onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:24px; cursor:pointer;">🔊 Listen Audio</button>
-                    <div class="missing-detail-sentence" style="font-size:25px; color:#1e293b; line-height:2.0; display:flex; flex-wrap:wrap; justify-content:center; align-items:center;">
+                    <div class="missing-detail-sentence" style="font-size:25px; color:#1e293b; line-height:2.0; display:flex; flex-wrap:wrap; justify-content:center; align-items:center; column-gap:8px; row-gap:4px;">
                         ${sentenceWithSlotsHTML}
                     </div>
                     <div id="missing-detail-feedback" style="min-height:24px; font-weight:bold; font-size:15px; margin-top:16px; color:${isAlreadySolved ? '#10b981' : '#64748b'};">
@@ -1026,10 +1030,10 @@ function renderCurrentStudentExercise() {
             setTimeout(() => speakTL(targetText), 200);
         }
         else if (actType === 'jumbled' || actType === 'listen-jumbled') {
-            let bankWords = shuffleArray(targetText.split(' '));
+            let bankWords = shuffleArray(targetText.trim().split(/\s+/).filter(Boolean));
             let slotWords = [];
             if (savedVal) {
-                slotWords = savedVal.split(' ');
+                slotWords = savedVal.trim().split(/\s+/).filter(Boolean);
                 const remaining = [...bankWords];
                 slotWords.forEach(sw => {
                     const idx = remaining.indexOf(sw);
@@ -1375,12 +1379,12 @@ function renderCurrentStudentExercise() {
                         if (clickedSlotIdx === removedIdx) {
                             block.dataset.missingSolved = 'true';
 
-                            // Reveal the missing word in the clicked slot and hide remaining boxes
+                            // Reveal the missing word in the clicked slot and remove remaining boxes
                             area.querySelectorAll('.missing-detail-slot').forEach(s => {
                                 if (s === this) {
-                                    s.outerHTML = `<span style="display:inline-block; padding:2px 10px; margin:0 5px; background:#dcfce7; border:2px solid #10b981; border-radius:6px; color:#065f46; font-weight:700;">${removedWord}</span>`;
+                                    s.outerHTML = `<span style="display:inline-block; padding:2px 10px; margin:0 2px; background:#dcfce7; border:2px solid #10b981; border-radius:6px; color:#065f46; font-weight:700;">${removedWord}</span>`;
                                 } else {
-                                    s.style.display = 'none';
+                                    s.remove();
                                 }
                             });
 
@@ -1901,15 +1905,10 @@ function saveStudentCurrentExerciseResponses() {
         if (block) {
             const slot = block.querySelector('.jumble-answer-slot');
             const bank = block.querySelector('.jumble-word-bank');
-            const studentText = slot ? Array.from(slot.querySelectorAll('.jumble-word-tile')).map(t => t.innerText).join(' ').trim() : '';
-            const wrongAttempts = parseInt(block.dataset.wrongAttempts || "0", 10);
+            const studentText = slot ? Array.from(slot.querySelectorAll('.jumble-word-tile')).map(t => t.innerText.trim()).join(' ').trim() : '';
             const isExactMatch = (normalizeString(studentText) === normalizeString(sents[studentSubItemIndex]?.t || ''));
             const isDone = !!(bank && bank.children.length === 0);
-
-            let points = 0;
-            if (isExactMatch) {
-                points = (wrongAttempts === 0) ? 1.0 : 0.5;
-            }
+            const points = isExactMatch ? 1.0 : 0.0;
 
             responses[studentSubItemIndex] = {
                 prompt: actType === 'listen-jumbled'
@@ -1917,9 +1916,8 @@ function saveStudentCurrentExerciseResponses() {
                     : (sents[studentSubItemIndex]?.tr || ''),
                 studentAnswer: studentText || '(Empty)',
                 correctAnswer: sents[studentSubItemIndex]?.t || '',
-                isCorrect: points === 1.0,
+                isCorrect: isExactMatch,
                 points: points,
-                mistakes: wrongAttempts,
                 isDone: isDone
             };
         }
@@ -1986,7 +1984,6 @@ function saveStudentCurrentExerciseResponses() {
             };
         }
     } 
-    // --- DICTATION / LISTENING / DELAYED COPYING ACTIVITIES ---
     // --- DICTATION / LISTENING / DELAYED COPYING ACTIVITIES ---
     else if (['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'].includes(actType)) {
         const s = sents[studentSubItemIndex];
