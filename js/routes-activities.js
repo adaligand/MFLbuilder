@@ -233,6 +233,34 @@ function hideSentenceTableCountControl() {
 /* =========================
    ACTIVITY MENU COLUMN WIDTHS, HEADER CONTROLS & LEARNER TIME ESTIMATE
 ========================= */
+function removeStraySentenceCountFromCol3(col3) {
+    if (!col3) return;
+
+    col3.querySelectorAll('label[for="sentence-count"]').forEach(el => {
+        const parent = el.parentElement;
+        el.remove();
+        if (parent && parent !== col3 && parent.children.length === 0 && (parent.textContent || '').trim() === '') {
+            parent.remove();
+        }
+    });
+
+    Array.from(col3.querySelectorAll('label, span, div, p')).forEach(el => {
+        if (el.children.length === 0 && /^Exercise Sentence Count\s*:?$/i.test((el.textContent || '').trim())) {
+            const parent = el.parentElement;
+            el.remove();
+            if (parent && parent !== col3 && parent.children.length === 0 && (parent.textContent || '').trim() === '') {
+                parent.remove();
+            }
+        }
+    });
+
+    Array.from(col3.childNodes).forEach(node => {
+        if (node.nodeType === Node.TEXT_NODE && /^Exercise Sentence Count\s*:?$/i.test((node.textContent || '').trim())) {
+            node.remove();
+        }
+    });
+}
+
 function arrangeActivityMenuLayout() {
     const menu = document.getElementById('activity-menu');
     const activityList = document.getElementById('activity-list');
@@ -240,6 +268,13 @@ function arrangeActivityMenuLayout() {
     const sentenceCountSelect = document.getElementById('sentence-count');
 
     if (!menu || !activityList || !sentencesContainer) return;
+
+    if (sentenceCountSelect && !sentenceCountSelect.dataset.countListenerBound) {
+        sentenceCountSelect.addEventListener('change', () => {
+            renderPerActivitySentenceBoxes();
+        });
+        sentenceCountSelect.dataset.countListenerBound = 'true';
+    }
 
     // Locate the 3-column wrapper inside #activity-menu
     let col1 = activityList.parentElement;
@@ -330,6 +365,9 @@ function arrangeActivityMenuLayout() {
                 }
             }
         }
+
+        // Remove any leftover "Exercise Sentence Count:" label/wrapper from Column 3
+        removeStraySentenceCountFromCol3(col3);
     }
 }
 
@@ -454,7 +492,8 @@ function updateAssignmentTimeEstimate() {
     }
 
     const domMap = getCurrentSentencesMapFromDOM();
-    const limit = parseInt(document.getElementById('sentence-count')?.value || 10, 10);
+    const rawLimit = parseInt(document.getElementById('sentence-count')?.value, 10);
+    const limit = (!isNaN(rawLimit) && rawLimit > 0) ? rawLimit : 10;
     const fallbackSentences = getAssembledSentences();
 
     let totalSeconds = 0;
@@ -1704,7 +1743,8 @@ function refreshActivitySentences(actId, e) {
 
     const currentMap = getCurrentSentencesMapFromDOM();
 
-    const limit = parseInt(document.getElementById('sentence-count')?.value || 10, 10);
+    const rawLimit = parseInt(document.getElementById('sentence-count')?.value, 10);
+    const limit = (!isNaN(rawLimit) && rawLimit > 0) ? rawLimit : 10;
     const allSentences = getAssembledSentences();
 
     let availablePool = [...allSentences];
@@ -1735,6 +1775,17 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
         container.dataset.timeEstimateBound = 'true';
     }
 
+    // Preserve currently expanded exercise cards across re-renders
+    const expandedActivityIds = new Set();
+    if (container) {
+        container.querySelectorAll('.act-card-body').forEach(bodyEl => {
+            const id = bodyEl.getAttribute('data-activity-id');
+            if (id && bodyEl.style.display !== 'none') {
+                expandedActivityIds.add(id);
+            }
+        });
+    }
+
     const checkedBoxes = Array.from(document.querySelectorAll('#activity-list input[type="checkbox"]:checked'));
 
     if (checkedBoxes.length === 0) {
@@ -1743,7 +1794,8 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
         return;
     }
 
-    if (overrideSentencesMap) {
+    const isExplicitOverride = Boolean(overrideSentencesMap);
+    if (isExplicitOverride) {
         window.editingSavedSentencesMap = overrideSentencesMap;
     } else {
         const domMap = getCurrentSentencesMapFromDOM();
@@ -1755,8 +1807,9 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
         }
     }
 
-    const savedMap = window.editingSavedSentencesMap || null;
-    const limit = parseInt(document.getElementById('sentence-count')?.value || 10, 10);
+    const savedMap = window.editingSavedSentencesMap || {};
+    const rawLimit = parseInt(document.getElementById('sentence-count')?.value, 10);
+    const limit = (!isNaN(rawLimit) && rawLimit > 0) ? rawLimit : 10;
     const allSentences = getAssembledSentences();
 
     let html = '';
@@ -1767,28 +1820,58 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
         if (actId === 'study') return;
 
         const actLabel = document.querySelector(`label[for="${cb.id}"]`)?.innerText || actId;
+        let availablePool = [...allSentences];
+        if (actId === 'faulty' || actId === 'listen-faulty') {
+            availablePool = availablePool.filter(isEligibleForFaulty);
+        }
+
         let actSents = [];
 
-        if (savedMap && savedMap[actId] && savedMap[actId].length > 0) {
-            actSents = savedMap[actId];
-        } else {
-            let availablePool = [...allSentences];
-            if (actId === 'faulty' || actId === 'listen-faulty') {
-                availablePool = availablePool.filter(isEligibleForFaulty);
-            }
+        if (savedMap[actId] && savedMap[actId].length > 0) {
+            if (isExplicitOverride) {
+                actSents = [...savedMap[actId]];
+            } else if (savedMap[actId].length > limit) {
+                // Trim down to match the updated Exercise Sentence Count
+                actSents = savedMap[actId].slice(0, limit);
+            } else if (savedMap[actId].length < limit) {
+                // Keep existing sentences and top up to match the updated Exercise Sentence Count
+                actSents = [...savedMap[actId]];
+                const existingTexts = new Set(actSents.map(s => (s.t || '').trim()));
+                const remainingNeeded = limit - actSents.length;
 
-            let unusedPool = availablePool.filter(s => !usedSentenceTexts.has(s.t.trim()));
+                const unusedPool = availablePool.filter(s =>
+                    !existingTexts.has((s.t || '').trim()) &&
+                    !usedSentenceTexts.has((s.t || '').trim())
+                );
+
+                if (unusedPool.length >= remainingNeeded) {
+                    actSents = actSents.concat(getBalancedSelection(unusedPool, remainingNeeded));
+                } else {
+                    const firstBatch = getBalancedSelection(unusedPool, unusedPool.length);
+                    actSents = actSents.concat(firstBatch);
+                    firstBatch.forEach(s => existingTexts.add((s.t || '').trim()));
+
+                    const stillNeeded = limit - actSents.length;
+                    const fallbackPool = availablePool.filter(s => !existingTexts.has((s.t || '').trim()));
+                    actSents = actSents.concat(getBalancedSelection(fallbackPool, stillNeeded));
+                }
+            } else {
+                actSents = [...savedMap[actId]];
+            }
+        } else {
+            let unusedPool = availablePool.filter(s => !usedSentenceTexts.has((s.t || '').trim()));
 
             if (unusedPool.length >= limit) {
                 actSents = getBalancedSelection(unusedPool, limit);
             } else {
                 actSents = getBalancedSelection(unusedPool, unusedPool.length);
                 const remainingNeeded = limit - actSents.length;
-                const fallbackPool = availablePool.filter(s => !actSents.some(already => already.t.trim() === s.t.trim()));
+                const fallbackPool = availablePool.filter(s => !actSents.some(already => (already.t || '').trim() === (s.t || '').trim()));
                 actSents = actSents.concat(getBalancedSelection(fallbackPool, remainingNeeded));
             }
         }
 
+        window.editingSavedSentencesMap[actId] = actSents;
         actSents.forEach(s => { if (s && s.t) usedSentenceTexts.add(s.t.trim()); });
         const usedGapWords = new Set();
 
@@ -1813,6 +1896,8 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
             gapBadgeHTML = `<span id="${badgeId}" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${gapLabel} removed)</span>`;
         }
 
+        const isExpanded = expandedActivityIds.has(actId);
+
         html += `
             <div class="act-sentence-card" id="act-card-${actId}">
                 <div class="act-card-header" onclick="toggleActivityCollapse('${actId}')">
@@ -1826,9 +1911,9 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
                             🔄 Refresh
                         </button>
                     </span>
-                    <span id="arrow-${actId}" style="font-size:14px; font-weight:bold;">▶</span>
+                    <span id="arrow-${actId}" style="font-size:14px; font-weight:bold;">${isExpanded ? '▼' : '▶'}</span>
                 </div>
-                <div id="act-body-${actId}" class="act-card-body" data-activity-id="${actId}" style="display:none;">
+                <div id="act-body-${actId}" class="act-card-body" data-activity-id="${actId}" style="display:${isExpanded ? 'block' : 'none'};">
                     ${actSents.map((s, idx) => {
                         if (actId === 'faulty' || actId === 'listen-faulty') {
                             const faultyVal = getOrGenerateFaultyTr(s);
