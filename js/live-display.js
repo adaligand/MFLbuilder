@@ -12,6 +12,8 @@ let cdGridTimerInterval = null;
 let cdGridRemainingSeconds = 300;
 let cdGridIsRunning = false;
 
+const CD_GAP_SUPPORTED_MODES = ['listen-dictation', 'delayed-dictation', 'delayed-copying'];
+
 function clearCDTimer() {
     if (cdTimer) {
         clearInterval(cdTimer);
@@ -190,9 +192,10 @@ function toggleGridCountdownTimer() {
 }
 
 /* =========================================================
-   DELAYED COPYING WORD-REMOVAL DROPDOWN CONTROLS
+   WORD-REMOVAL DROPDOWN CONTROLS
+   (Listening Dictation, Delayed Dictation, Delayed Copying)
    ========================================================= */
-function ensureCDDelayedCopyingControls() {
+function ensureCDGapControls() {
     const gameSelect = document.getElementById('class-display-game-select');
     if (!gameSelect || !gameSelect.parentElement) return;
 
@@ -203,8 +206,8 @@ function ensureCDDelayedCopyingControls() {
         wrap.innerHTML = `
             <label for="cd-delayed-copying-gap-select" style="font-size:13px; font-weight:600; color:#475569; white-space:nowrap;">Remove:</label>
             <select id="cd-delayed-copying-gap-select"
-                    onchange="handleCDDelayedCopyingGapChange()"
-                    title="Choose how many words are removed in Delayed Copying"
+                    onchange="handleCDGapChange()"
+                    title="Choose how many words are removed"
                     style="padding:6px 10px; border-radius:8px; border:1.5px solid #cbd5e1; font-size:14px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
                 <option value="1" selected>1 word</option>
                 <option value="25">25% of words</option>
@@ -217,25 +220,60 @@ function ensureCDDelayedCopyingControls() {
     }
 }
 
-function getCDDelayedCopyingGapLevel() {
+// Backwards-compatible alias
+function ensureCDDelayedCopyingControls() {
+    ensureCDGapControls();
+}
+
+function getCDGapLevel() {
     const sel = document.getElementById('cd-delayed-copying-gap-select');
     const raw = sel ? sel.value : '1';
     const cleaned = String(raw).replace('%', '').trim();
     return ['1', '25', '50', '75', '100'].includes(cleaned) ? cleaned : '1';
 }
 
-function handleCDDelayedCopyingGapChange() {
-    const mode = document.getElementById('class-display-game-select')?.value;
-    if (mode !== 'delayed-copying' || !currentCDTargetText) return;
+// Backwards-compatible alias
+function getCDDelayedCopyingGapLevel() {
+    return getCDGapLevel();
+}
 
-    const gapLevel = getCDDelayedCopyingGapLevel();
+function handleCDGapChange() {
+    const mode = document.getElementById('class-display-game-select')?.value;
+    if (!CD_GAP_SUPPORTED_MODES.includes(mode) || !currentCDTargetText) return;
+
+    const gapLevel = getCDGapLevel();
     currentCDGapText = removeWordsFromSentence(currentCDTargetText, gapLevel);
 
-    // If the countdown has finished and the gapped sentence is already displayed, update it live
-    const textEl = document.getElementById('cd-copy-text');
-    if (textEl && !cdTimer) {
-        textEl.innerHTML = currentCDGapText;
+    if (mode === 'listen-dictation') {
+        const listenEl = document.getElementById('cd-listen-dictation-text');
+        if (listenEl) {
+            listenEl.innerHTML = currentCDGapText;
+        }
+        return;
     }
+
+    if (mode === 'delayed-dictation') {
+        const statusMsg = document.getElementById('cd-status-msg');
+        const startBtn = document.getElementById('cd-start-dd-btn');
+        // Update live if the audio + memory countdown has finished and the gapped sentence is visible
+        if (statusMsg && !cdTimer && startBtn && startBtn.style.display === 'none') {
+            statusMsg.innerHTML = currentCDGapText;
+        }
+        return;
+    }
+
+    if (mode === 'delayed-copying') {
+        // Update live if the countdown has finished and the gapped sentence is already displayed
+        const textEl = document.getElementById('cd-copy-text');
+        if (textEl && !cdTimer) {
+            textEl.innerHTML = currentCDGapText;
+        }
+    }
+}
+
+// Backwards-compatible alias
+function handleCDDelayedCopyingGapChange() {
+    handleCDGapChange();
 }
 
 function removeWordsFromSentence(text, gapLevel = '1') {
@@ -318,7 +356,7 @@ function openInteractiveClassDisplay() {
     const modal = document.getElementById('class-display-modal');
     document.body.style.overflow = 'hidden';
 
-    ensureCDDelayedCopyingControls();
+    ensureCDGapControls();
 
     // Reset dropdown selection back to the top activity on re-open
     const gameSelect = document.getElementById('class-display-game-select');
@@ -428,14 +466,14 @@ function handleCDReattempt(targetText) {
 
 function playClassDisplayGame() {
     clearCDTimer();
-    ensureCDDelayedCopyingControls();
+    ensureCDGapControls();
 
     const mode = document.getElementById('class-display-game-select').value;
     const gridTimerBar = document.getElementById('cd-grid-timer-bar');
     const dcGapWrap = document.getElementById('cd-delayed-copying-gap-wrap');
 
     if (dcGapWrap) {
-        dcGapWrap.style.display = (mode === 'delayed-copying') ? 'inline-flex' : 'none';
+        dcGapWrap.style.display = CD_GAP_SUPPORTED_MODES.includes(mode) ? 'inline-flex' : 'none';
     }
 
     if (mode !== 'sentence-grid') {
@@ -505,23 +543,23 @@ function playClassDisplayGame() {
     }
     // 2. Listen / Trad
     else if (mode === 'listen-trad') {
-        const gapEnglish = removeWordsFromSentence(englishText);
+        const gapEnglish = removeWordsFromSentence(englishText, '1');
         questionHTML = `
             <button onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size: 24px; padding: 12px 32px; margin-bottom: 25px;">🔊 Listen</button>
             <div class="cd-question-text">${gapEnglish}</div>
         `;
     }
 
-    // 3. Listening / Dictation
+    // 3. Listening / Dictation (uses selected word count/percentage)
     else if (mode === 'listen-dictation') {
-        const gapTarget = removeWordsFromSentence(targetText);
+        currentCDGapText = removeWordsFromSentence(targetText, getCDGapLevel());
         questionHTML = `
             <button onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size: 24px; padding: 12px 32px; margin-bottom: 25px;">🔊 Listen</button>
-            <div class="cd-question-text">${gapTarget}</div>
+            <div id="cd-listen-dictation-text" class="cd-question-text">${currentCDGapText}</div>
         `;
     }
 
-    // 4. Delayed Dictation
+    // 4. Delayed Dictation (uses selected word count/percentage)
     else if (mode === 'delayed-dictation') {
         questionHTML = `
             <div id="cd-delayed-stage" style="width: 100%; text-align: center;">
@@ -531,7 +569,7 @@ function playClassDisplayGame() {
         `;
     }
 
-    // 5. Delayed Copying
+    // 5. Delayed Copying (uses selected word count/percentage)
     else if (mode === 'delayed-copying') {
         questionHTML = `
             <div id="cd-delayed-copy-stage" style="width: 100%; text-align: center;">
@@ -560,13 +598,14 @@ function playClassDisplayGame() {
 
 function startDelayedDictation(targetText, isReattempt = false) {
     clearCDTimer();
+    currentCDTargetText = targetText;
     const statusMsg = document.getElementById('cd-status-msg');
     const startBtn = document.getElementById('cd-start-dd-btn');
     const reattemptBtn = document.getElementById('cd-reattempt-btn');
 
-    // Generate gap text only on the first attempt
+    // Generate gap text using selected word count/percentage on the first attempt
     if (!isReattempt || !currentCDGapText) {
-        currentCDGapText = removeWordsFromSentence(targetText);
+        currentCDGapText = removeWordsFromSentence(targetText, getCDGapLevel());
     }
 
     if (startBtn) startBtn.style.display = 'none';
@@ -610,7 +649,7 @@ function startDelayedCopyingSequence(targetText, isReattempt = false) {
 
     // Generate gap text only on the first attempt
     if (!isReattempt || !currentCDGapText) {
-        currentCDGapText = removeWordsFromSentence(targetText, getCDDelayedCopyingGapLevel());
+        currentCDGapText = removeWordsFromSentence(targetText, getCDGapLevel());
     }
 
     if (reattemptBtn) reattemptBtn.style.display = 'none';
