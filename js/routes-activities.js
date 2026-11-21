@@ -178,7 +178,10 @@ function openActivityMenu() {
         {id:'listen-trad', label:'🎧 Listen / Translate'},
         {id:'listen-dictation', label:'🎧 Listening Dictation'},
         {id:'delayed-dictation', label:'🎧 Delayed Dictation'},
-        {id:'delayed-copying', label:'Delayed Copying'}
+        {id:'delayed-copying', label:'Delayed Copying'},
+        {id:'listen-missing', label:'🎧 Missing Detail'},
+        {id:'listen-faulty', label:'🎧 Faulty Translation'},
+        {id:'listen-jumbled', label:'🎧 Unjumble'}
     ];
 
     const defaultGapLevels = {
@@ -1010,7 +1013,7 @@ function getCurrentSentencesMapFromDOM() {
                 const faultyTr = faultyTrInput ? faultyTrInput.value.trim() : "";
                 if (t || tr) {
                     const itemObj = { t, tr };
-                    if (actId === 'faulty' && faultyTr) {
+                    if ((actId === 'faulty' || actId === 'listen-faulty') && faultyTr) {
                         itemObj.faultyTr = faultyTr;
                     }
                     sents.push(itemObj);
@@ -1033,7 +1036,7 @@ function refreshActivitySentences(actId, e) {
     const allSentences = getAssembledSentences();
 
     let availablePool = [...allSentences];
-    if (actId === 'faulty') {
+    if (actId === 'faulty' || actId === 'listen-faulty') {
         availablePool = availablePool.filter(isEligibleForFaulty);
     }
 
@@ -1083,7 +1086,7 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
             actSents = savedMap[actId];
         } else {
             let availablePool = [...allSentences];
-            if (actId === 'faulty') {
+            if (actId === 'faulty' || actId === 'listen-faulty') {
                 availablePool = availablePool.filter(isEligibleForFaulty);
             }
 
@@ -1104,7 +1107,7 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
         }
         const usedGapWords = new Set();
 
-        if (actId === 'faulty' && actSents.length === 0) {
+        if ((actId === 'faulty' || actId === 'listen-faulty') && actSents.length === 0) {
             html += `
                 <div class="act-sentence-card" id="act-card-${actId}">
                     <div class="act-card-header" style="background:#fee2e2;">
@@ -1142,7 +1145,7 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
                 </div>
                 <div id="act-body-${actId}" class="act-card-body" data-activity-id="${actId}" style="display:none;">
                     ${actSents.map((s, idx) => {
-                        if (actId === 'faulty') {
+                        if (actId === 'faulty' || actId === 'listen-faulty') {
                             const faultyVal = getOrGenerateFaultyTr(s);
                             return `
                                 <div class="act-sentence-row" style="display:flex; gap:8px; margin-bottom:6px; align-items:center;">
@@ -1251,7 +1254,7 @@ function generateWorksheet() {
     // Filter out digital-only listening & delayed activities from print
     var selected = activityOrder.filter(function(id) {
         var el = document.getElementById('chk-' + id);
-        return el && el.checked && !['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'].includes(id);
+        return el && el.checked && !['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying', 'listen-missing', 'listen-faulty', 'listen-jumbled'].includes(id);
     });
     
     if (selected.length === 0) return alert("Select at least one activity!");
@@ -1623,7 +1626,7 @@ async function publishTaskToClassroom() {
                     const faultyTr = faultyTrInput ? faultyTrInput.value.trim() : "";
                     if (t || tr) {
                         const itemObj = { t, tr: tr };
-                        if (actId === 'faulty' && faultyTr) {
+                        if ((actId === 'faulty' || actId === 'listen-faulty') && faultyTr) {
                             itemObj.faultyTr = faultyTr;
                         }
                         sents.push(itemObj);
@@ -1648,7 +1651,10 @@ async function publishTaskToClassroom() {
                 structuredSentencesPerActivity['study'] = getBalancedSelection(allSentences, tableLimit);
             } else {
                 const exerciseLimit = parseInt(document.getElementById('sentence-count').value, 10);
-                structuredSentencesPerActivity[actId] = getBalancedSelection(allSentences, exerciseLimit);
+                const pool = (actId === 'faulty' || actId === 'listen-faulty')
+                    ? allSentences.filter(isEligibleForFaulty)
+                    : allSentences;
+                structuredSentencesPerActivity[actId] = getBalancedSelection(pool, exerciseLimit);
                 totalSentencesCount += structuredSentencesPerActivity[actId].length;
             }
         }
