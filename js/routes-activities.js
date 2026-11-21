@@ -52,6 +52,7 @@ function onActivityGapLevelChange(arg1, arg2) {
             legacyBadge.innerText = `(${label} removed)`;
         }
     }
+    updateAssignmentTimeEstimate();
 }
 
 function onDelayedCopyingGapLevelChange(selectEl) {
@@ -74,15 +75,15 @@ function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle 
                 onclick="event.stopPropagation()"
                 onchange="event.stopPropagation(); onActivityGapLevelChange('${a.id}', this)"
                 title="Choose how many words are removed in ${a.label}"
-                style="margin-left:auto; max-width:112px; padding:3px 6px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                style="margin-left:auto; flex-shrink:0; max-width:104px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
                 ${getActivityGapOptionsHTML(selectedLevel)}
            </select>`
         : '';
 
     return `
         <div class="activity-row" style="${extraRowStyle}">
-            <input type="checkbox" value="${a.id}" id="chk-${a.id}" onchange="renderPerActivitySentenceBoxes()">
-            <label for="chk-${a.id}" style="cursor:pointer; font-weight:500; font-size: 13px; line-height: 1.25;">${a.label}</label>
+            <input type="checkbox" value="${a.id}" id="chk-${a.id}" style="flex-shrink:0;" onchange="renderPerActivitySentenceBoxes()">
+            <label for="chk-${a.id}" style="cursor:pointer; font-weight:500; font-size: 13px; line-height: 1.25; white-space: nowrap;">${a.label}</label>
             ${dropdownHTML}
         </div>
     `;
@@ -128,6 +129,23 @@ function applyActivityListLayoutOverrides() {
         group.style.setProperty('min-height', '0', 'important');
         group.style.setProperty('max-height', 'none', 'important');
         group.style.setProperty('margin', '0', 'important');
+    });
+
+    container.querySelectorAll('.activity-row').forEach(row => {
+        const cb = row.querySelector('input[type="checkbox"]');
+        if (cb) cb.style.flexShrink = '0';
+        const lbl = row.querySelector('label');
+        if (lbl) {
+            lbl.style.whiteSpace = 'nowrap';
+            lbl.style.fontSize = '13px';
+        }
+        const sel = row.querySelector('select');
+        if (sel) {
+            sel.style.flexShrink = '0';
+            sel.style.maxWidth = '104px';
+            sel.style.padding = '2px 5px';
+            sel.style.fontSize = '11px';
+        }
     });
 }
 
@@ -212,8 +230,226 @@ function hideSentenceTableCountControl() {
     }
 }
 
+/* =========================
+   ACTIVITY MENU COLUMN WIDTHS, HEADER CONTROLS & TIME ESTIMATE
+========================= */
+function arrangeActivityMenuLayout() {
+    const menu = document.getElementById('activity-menu');
+    const activityList = document.getElementById('activity-list');
+    const sentencesContainer = document.getElementById('per-activity-sentences-container');
+    const sentenceCountSelect = document.getElementById('sentence-count');
+
+    if (!menu || !activityList || !sentencesContainer) return;
+
+    // Locate the 3-column wrapper inside #activity-menu
+    let col1 = activityList.parentElement;
+    while (col1 && col1.parentElement && !col1.parentElement.contains(sentencesContainer)) {
+        col1 = col1.parentElement;
+    }
+
+    const columnsWrapper = col1 ? col1.parentElement : null;
+    if (columnsWrapper && columnsWrapper.children.length >= 3) {
+        const cols = Array.from(columnsWrapper.children);
+        const col2 = cols.find(el => el.contains(sentencesContainer));
+        const col3 = cols.find(el => el !== col1 && el !== col2);
+
+        const wrapperDisplay = window.getComputedStyle(columnsWrapper).display;
+        if (wrapperDisplay === 'grid') {
+            columnsWrapper.style.setProperty('grid-template-columns', '320px minmax(0, 1fr) 235px', 'important');
+        } else {
+            columnsWrapper.style.setProperty('display', 'flex', 'important');
+            columnsWrapper.style.setProperty('align-items', 'stretch', 'important');
+        }
+
+        if (col1) {
+            col1.style.setProperty('flex', '0 0 320px', 'important');
+            col1.style.setProperty('width', '320px', 'important');
+            col1.style.setProperty('min-width', '320px', 'important');
+            col1.style.setProperty('max-width', '320px', 'important');
+        }
+        if (col2) {
+            col2.style.setProperty('flex', '1 1 auto', 'important');
+            col2.style.setProperty('min-width', '0', 'important');
+        }
+        if (col3) {
+            col3.style.setProperty('flex', '0 0 235px', 'important');
+            col3.style.setProperty('width', '235px', 'important');
+            col3.style.setProperty('min-width', '225px', 'important');
+            col3.style.setProperty('max-width', '245px', 'important');
+        }
+
+        // Move "Exercise Sentence Count:" + add Estimated Time badge next to "2. Customize Exercise Sentences"
+        if (col2) {
+            let headerBar = document.getElementById('customize-sentences-header-bar');
+            if (!headerBar) {
+                const headingEl = Array.from(col2.children).find(el =>
+                    el !== sentencesContainer && /Customize Exercise Sentences/i.test(el.textContent || '')
+                );
+
+                if (headingEl) {
+                    headerBar = document.createElement('div');
+                    headerBar.id = 'customize-sentences-header-bar';
+                    headerBar.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 4px;';
+
+                    headingEl.style.margin = '0';
+                    headingEl.style.whiteSpace = 'nowrap';
+                    headingEl.parentNode.insertBefore(headerBar, headingEl);
+                    headerBar.appendChild(headingEl);
+
+                    const controlsRight = document.createElement('div');
+                    controlsRight.id = 'customize-header-controls';
+                    controlsRight.style.cssText = 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto;';
+                    headerBar.appendChild(controlsRight);
+
+                    if (sentenceCountSelect) {
+                        const oldWrapper = sentenceCountSelect.parentElement;
+                        const countPill = document.createElement('label');
+                        countPill.id = 'sentence-count-inline-wrapper';
+                        countPill.setAttribute('for', 'sentence-count');
+                        countPill.style.cssText = 'display: inline-flex; align-items: center; gap: 6px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 3px 8px; font-size: 12px; font-weight: 600; color: #334155; margin: 0; cursor: pointer;';
+
+                        const textSpan = document.createElement('span');
+                        textSpan.textContent = 'Exercise Sentence Count:';
+
+                        sentenceCountSelect.style.cssText = 'padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; font-weight: 700; color: #0f172a; background: #ffffff; cursor: pointer; margin: 0; width: auto;';
+
+                        countPill.appendChild(textSpan);
+                        countPill.appendChild(sentenceCountSelect);
+                        controlsRight.appendChild(countPill);
+
+                        if (oldWrapper && oldWrapper !== col3 && oldWrapper.children.length === 0) {
+                            oldWrapper.remove();
+                        }
+                    }
+
+                    const estBadge = document.createElement('span');
+                    estBadge.id = 'assignment-estimated-time';
+                    estBadge.style.cssText = 'display: inline-flex; align-items: center; gap: 4px; background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 6px; white-space: nowrap;';
+                    estBadge.textContent = '⏱️ Est. time: 0 mins';
+                    controlsRight.appendChild(estBadge);
+                }
+            }
+        }
+    }
+}
+
+function estimateSingleSentenceSeconds(actId, sentenceObj) {
+    const targetText = (sentenceObj?.t || '').replace(/\*/g, '').trim();
+    const engText = (sentenceObj?.tr || '').replace(/\*/g, '').trim();
+    const refText = targetText || engText;
+
+    const words = refText ? refText.split(/\s+/).filter(Boolean).length : 6;
+    const chars = refText.replace(/\s+/g, '').length || (words * 5);
+
+    // Spoken audio duration (~0.45s per word + 1.2s player start)
+    const audioSec = 1.2 + (words * 0.45);
+
+    const getGapWordCount = (id) => {
+        const lvl = document.getElementById(`${id}-gap-select`)?.value || '1';
+        if (lvl === '1') return 1;
+        const pct = parseInt(lvl, 10) || 25;
+        return Math.max(1, Math.round(words * (pct / 100)));
+    };
+
+    switch (actId) {
+        case 'match':
+            // Scanned together as a matching table rather than 1-by-1
+            return 4.0 + (words * 0.6);
+        case 'faulty':
+            return 5.0 + (words * 0.7);
+        case 'listen-faulty':
+            return audioSec + 4.5 + (words * 0.5);
+        case 'listen-missing':
+            return audioSec + 5.0 + (words * 0.6);
+        case 'nospaces':
+            return 4.0 + (words * 1.4);
+        case 'jumbled':
+            return 4.0 + (words * 1.5);
+        case 'listen-jumbled':
+            return audioSec + 4.5 + (words * 1.5);
+        case 'gap-en':
+        case 'gap-t':
+            return 8.5 + (words * 0.6);
+        case 'vowels':
+        case 'cons':
+            return 4.5 + (chars * 0.34);
+        case 'listen-trad':
+        case 'listen-dictation': {
+            const gapped = getGapWordCount(actId);
+            return audioSec + 4.5 + (gapped * 2.2);
+        }
+        case 'delayed-dictation': {
+            // Includes built-in 3s memorise delay
+            const gapped = getGapWordCount(actId);
+            return audioSec + 3.0 + 4.0 + (gapped * 2.4);
+        }
+        case 'delayed-copying': {
+            // Includes built-in 7s reading + 3s memorise = 10s fixed countdown
+            const gapped = getGapWordCount(actId);
+            return 10.0 + 2.5 + (gapped * 2.4);
+        }
+        case 'trans-en':
+            return 5.0 + (words * 1.8);
+        case 'trans-target':
+            return 6.0 + (words * 2.6);
+        default:
+            return 6.0 + (words * 1.5);
+    }
+}
+
+function updateAssignmentTimeEstimate() {
+    const estBadge = document.getElementById('assignment-estimated-time');
+    if (!estBadge) return;
+
+    const checkedBoxes = Array.from(document.querySelectorAll('#activity-list input[type="checkbox"]:checked'))
+        .filter(cb => cb.value !== 'study');
+
+    if (checkedBoxes.length === 0) {
+        estBadge.textContent = '⏱️ Est. time: 0 mins';
+        estBadge.title = 'Select activities to calculate estimated student completion time.';
+        return;
+    }
+
+    const domMap = getCurrentSentencesMapFromDOM();
+    const limit = parseInt(document.getElementById('sentence-count')?.value || 10, 10);
+    const fallbackSentences = getAssembledSentences();
+
+    let totalSeconds = 0;
+    let totalItems = 0;
+    let totalWords = 0;
+
+    checkedBoxes.forEach(cb => {
+        const actId = cb.value;
+        let sents = (domMap[actId] && domMap[actId].length > 0)
+            ? domMap[actId]
+            : ((window.editingSavedSentencesMap && window.editingSavedSentencesMap[actId] && window.editingSavedSentencesMap[actId].length > 0)
+                ? window.editingSavedSentencesMap[actId]
+                : fallbackSentences.slice(0, limit));
+
+        if (!sents || sents.length === 0) {
+            sents = Array.from({ length: limit }, () => ({ t: 'sample sentence of six words', tr: '' }));
+        }
+
+        sents.forEach(s => {
+            totalSeconds += estimateSingleSentenceSeconds(actId, s);
+            const wCount = ((s?.t || s?.tr || '').replace(/\*/g, '').trim().split(/\s+/).filter(Boolean).length) || 6;
+            totalWords += wCount;
+            totalItems += 1;
+        });
+    });
+
+    const totalMinutes = Math.max(1, Math.round(totalSeconds / 60));
+    const avgWords = totalItems > 0 ? (totalWords / totalItems).toFixed(1) : '0';
+
+    estBadge.textContent = totalMinutes === 1
+        ? '⏱️ Est. time: ~1 min'
+        : `⏱️ Est. time: ~${totalMinutes} mins`;
+    estBadge.title = `Based on ${checkedBoxes.length} activit${checkedBoxes.length === 1 ? 'y' : 'ies'}, ${limit} sentence${limit === 1 ? '' : 's'}/exercise, and avg. ${avgWords} words/sentence.`;
+}
+
 function ensureGroupedActivityList() {
     hideSentenceTableCountControl();
+    arrangeActivityMenuLayout();
 
     const container = document.getElementById('activity-list');
     if (!container) return;
@@ -514,6 +750,7 @@ function openActivityMenu() {
     window.duplicatingAssignmentLang = null;
 
     hideSentenceTableCountControl();
+    arrangeActivityMenuLayout();
 
     // Bind current editor state to assignment options modal
     activeAssignmentBuilderId = currentDocId || null;
@@ -1433,10 +1670,16 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
     updateActivityCategoryCounts(Boolean(overrideSentencesMap));
 
     const container = document.getElementById('per-activity-sentences-container');
+    if (container && !container.dataset.timeEstimateBound) {
+        container.addEventListener('input', () => updateAssignmentTimeEstimate());
+        container.dataset.timeEstimateBound = 'true';
+    }
+
     const checkedBoxes = Array.from(document.querySelectorAll('#activity-list input[type="checkbox"]:checked'));
 
     if (checkedBoxes.length === 0) {
         container.innerHTML = '<div style="color:#64748b; font-style:italic; padding:10px;">Select at least one activity above to customize its sentences.</div>';
+        updateAssignmentTimeEstimate();
         return;
     }
 
@@ -1565,6 +1808,7 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
     });
 
     container.innerHTML = html;
+    updateAssignmentTimeEstimate();
 }
 
 function addAsteriskToGapWord(sentenceStr, usedGapWords) {
@@ -2168,4 +2412,7 @@ async function publishTaskToClassroom() {
     closeModals();
 }
 
-document.addEventListener('DOMContentLoaded', hideSentenceTableCountControl);
+document.addEventListener('DOMContentLoaded', () => {
+    hideSentenceTableCountControl();
+    arrangeActivityMenuLayout();
+});
