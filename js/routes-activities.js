@@ -90,7 +90,7 @@ function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle 
 
 function buildActivityCategoryGroupHTML(category, title, icon, innerRowsHTML, isOpen = false) {
     return `
-        <div class="activity-category-group" data-category="${category}" style="flex: 0 0 auto !important; height: auto !important; min-height: 0 !important; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; background: #ffffff; margin-bottom: 6px;">
+        <div class="activity-category-group" data-category="${category}" style="display: block !important; flex: 0 0 auto !important; height: auto !important; min-height: 0 !important; max-height: none !important; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; background: #ffffff; margin: 0 !important;">
             <button type="button"
                 id="btn-toggle-${category}-activities"
                 onclick="toggleActivityCategory('${category}')"
@@ -104,40 +104,77 @@ function buildActivityCategoryGroupHTML(category, title, icon, innerRowsHTML, is
                     <span id="chevron-${category}" style="font-size: 11px; color: #475569;">${isOpen ? '▼' : '▶'}</span>
                 </span>
             </button>
-            <div id="group-${category}-activities" style="flex: 0 0 auto !important; height: auto !important; min-height: 0 !important; padding: 4px 6px; display: ${isOpen ? 'flex' : 'none'}; flex-direction: column; gap: 2px;">
+            <div id="group-${category}-activities" ${isOpen ? '' : 'hidden'} style="flex: 0 0 auto !important; height: ${isOpen ? 'auto' : '0px'} !important; min-height: 0 !important; padding: ${isOpen ? '4px 6px' : '0px'} !important; display: ${isOpen ? 'flex' : 'none'} !important; flex-direction: column; gap: 2px;">
                 ${innerRowsHTML}
             </div>
         </div>
     `;
 }
 
-function toggleActivityCategory(category, forceOpen = null) {
+function applyActivityListLayoutOverrides() {
+    const container = document.getElementById('activity-list');
+    if (!container) return;
+
+    container.style.setProperty('display', 'flex', 'important');
+    container.style.setProperty('flex-direction', 'column', 'important');
+    container.style.setProperty('justify-content', 'flex-start', 'important');
+    container.style.setProperty('align-items', 'stretch', 'important');
+    container.style.setProperty('gap', '8px', 'important');
+
+    container.querySelectorAll('.activity-category-group').forEach(group => {
+        group.style.setProperty('display', 'block', 'important');
+        group.style.setProperty('flex', '0 0 auto', 'important');
+        group.style.setProperty('height', 'auto', 'important');
+        group.style.setProperty('min-height', '0', 'important');
+        group.style.setProperty('max-height', 'none', 'important');
+        group.style.setProperty('margin', '0', 'important');
+    });
+}
+
+function setActivityCategoryOpenState(category, shouldOpen) {
     const listEl = document.getElementById(`group-${category}-activities`);
     const btnEl = document.getElementById(`btn-toggle-${category}-activities`);
     const chevronEl = document.getElementById(`chevron-${category}`);
     if (!listEl) return;
 
-    const isCurrentlyOpen = listEl.style.display !== 'none';
+    if (shouldOpen) {
+        listEl.hidden = false;
+        listEl.style.setProperty('display', 'flex', 'important');
+        listEl.style.setProperty('flex-direction', 'column', 'important');
+        listEl.style.setProperty('height', 'auto', 'important');
+        listEl.style.setProperty('min-height', '0', 'important');
+        listEl.style.setProperty('padding', '4px 6px', 'important');
+    } else {
+        listEl.hidden = true;
+        listEl.style.setProperty('display', 'none', 'important');
+        listEl.style.setProperty('height', '0px', 'important');
+        listEl.style.setProperty('min-height', '0', 'important');
+        listEl.style.setProperty('padding', '0px', 'important');
+    }
+
+    if (btnEl) {
+        btnEl.style.setProperty('border-bottom', shouldOpen ? '1px solid #e2e8f0' : 'none', 'important');
+    }
+    if (chevronEl) {
+        chevronEl.textContent = shouldOpen ? '▼' : '▶';
+    }
+}
+
+function toggleActivityCategory(category, forceOpen = null) {
+    const listEl = document.getElementById(`group-${category}-activities`);
+    if (!listEl) return;
+
+    const isCurrentlyOpen = !listEl.hidden && window.getComputedStyle(listEl).display !== 'none';
     const shouldOpen = forceOpen !== null ? forceOpen : !isCurrentlyOpen;
 
     // Exclusive accordion: unfolding one category automatically collapses the other
     if (shouldOpen) {
         const otherCategory = category === 'text' ? 'audio' : 'text';
-        const otherListEl = document.getElementById(`group-${otherCategory}-activities`);
-        const otherBtnEl = document.getElementById(`btn-toggle-${otherCategory}-activities`);
-        const otherChevronEl = document.getElementById(`chevron-${otherCategory}`);
-        if (otherListEl) otherListEl.style.display = 'none';
-        if (otherBtnEl) otherBtnEl.style.borderBottom = 'none';
-        if (otherChevronEl) otherChevronEl.textContent = '▶';
+        setActivityCategoryOpenState(otherCategory, false);
     }
 
-    listEl.style.display = shouldOpen ? 'flex' : 'none';
-    if (btnEl) {
-        btnEl.style.borderBottom = shouldOpen ? '1px solid #e2e8f0' : 'none';
-    }
-    if (chevronEl) {
-        chevronEl.textContent = shouldOpen ? '▼' : '▶';
-    }
+    setActivityCategoryOpenState(category, shouldOpen);
+    applyActivityListLayoutOverrides();
 }
 
 function updateActivityCategoryCounts(autoExpandChecked = false) {
@@ -186,6 +223,7 @@ function ensureGroupedActivityList() {
     if (legacyStudyRow) legacyStudyRow.remove();
 
     if (document.getElementById('group-text-activities') && document.getElementById('group-audio-activities')) {
+        applyActivityListLayoutOverrides();
         return;
     }
 
@@ -200,9 +238,9 @@ function ensureGroupedActivityList() {
     const audioGroup = document.getElementById('group-audio-activities');
 
     existingRows.forEach(row => {
-        row.style.flex = '0 0 auto';
-        row.style.height = 'auto';
-        row.style.minHeight = '0';
+        row.style.setProperty('flex', '0 0 auto', 'important');
+        row.style.setProperty('height', 'auto', 'important');
+        row.style.setProperty('min-height', '0', 'important');
         const cb = row.querySelector('input[type="checkbox"]');
         const actId = cb ? cb.value : '';
         if (actId === 'study') return;
@@ -212,6 +250,10 @@ function ensureGroupedActivityList() {
             textGroup.appendChild(row);
         }
     });
+
+    setActivityCategoryOpenState('text', true);
+    setActivityCategoryOpenState('audio', false);
+    applyActivityListLayoutOverrides();
 }
 
 /* =========================
@@ -525,6 +567,10 @@ function openActivityMenu() {
     document.getElementById('activity-list').innerHTML =
         buildActivityCategoryGroupHTML('text', 'Text Activities', '📝', textRowsHTML, true) +
         buildActivityCategoryGroupHTML('audio', 'Audio Activities', '🎧', audioRowsHTML, false);
+
+    setActivityCategoryOpenState('text', true);
+    setActivityCategoryOpenState('audio', false);
+    applyActivityListLayoutOverrides();
     
     renderPerActivitySentenceBoxes();
     document.getElementById('activity-menu').style.display = 'flex';
