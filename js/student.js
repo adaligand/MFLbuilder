@@ -19,7 +19,10 @@ function getCleanActivityTitle(type, lang) {
         'listen-trad': '🎧 Gapped Translation',
         'listen-dictation': '🎧 Dictation',
         'delayed-dictation': '🎧 Delayed Dictation',
-        'delayed-copying': 'Delayed Copying'
+        'delayed-copying': 'Delayed Copying',
+        'listen-missing': '🎧 Missing Detail',
+        'listen-faulty': '🎧 Faulty Translation',
+        'listen-jumbled': '🎧 Unjumble Sentences'
     };
     return map[type] || type;
 }
@@ -87,7 +90,10 @@ function getActivityInstruction(type, lang) {
         'listen-trad': ltInstruction,
         'listen-dictation': ldInstruction,
         'delayed-dictation': ddInstruction,
-        'delayed-copying': dcInstruction
+        'delayed-copying': dcInstruction,
+        'listen-missing': `Listen to the audio and click the box where a ${lang} word has been removed.`,
+        'listen-faulty': 'Listen to the audio and click on the wrong word in the English translation.',
+        'listen-jumbled': 'Listen to the audio and click the word chunks in order to form the sentence.'
     };
     return map[type] || 'Complete the exercise below.';
 }
@@ -197,7 +203,7 @@ async function loadStudentTask(assignmentId) {
                             if (!r || !r.studentAnswer) return false;
                             const ans = r.studentAnswer.trim();
                             if (ans === '' || ans === '(Empty)' || ans.startsWith('(Incomplete') || ans === '(Unmatched)') return false;
-                            if ((act === 'nospaces' || act === 'jumbled' || act === 'faulty') && !r.isDone) return false;
+                            if (['nospaces', 'jumbled', 'faulty', 'listen-missing', 'listen-faulty', 'listen-jumbled'].includes(act) && !r.isDone) return false;
                             if ((act === 'vowels' || act === 'cons') && (!Array.isArray(r.letterValues) || r.letterValues.length === 0 || r.letterValues.some(v => !v.trim()))) return false;
                             if (STUDENT_MULTI_GAP_ACTIVITIES.includes(act) && Array.isArray(r.gapValues) && r.gapValues.length > 0 && r.gapValues.some(v => !v || !v.trim())) return false;
                             return true;
@@ -412,7 +418,7 @@ function isCurrentExerciseCompleted() {
         if (ans === '' || ans === '(Empty)' || ans.startsWith('(Incomplete') || ans === '(Unmatched)') {
             return false;
         }
-        if ((actType === 'nospaces' || actType === 'jumbled' || actType === 'faulty') && !resp.isDone) {
+        if (['nospaces', 'jumbled', 'faulty', 'listen-missing', 'listen-faulty', 'listen-jumbled'].includes(actType) && !resp.isDone) {
             return false;
         }
         if ((actType === 'vowels' || actType === 'cons') &&
@@ -496,7 +502,7 @@ function lockCurrentExerciseUI() {
     const area = document.getElementById('exercise-interactive-area');
     if (!area) return;
 
-    area.querySelectorAll('input, button, .interactive-tile, .space-span, .letter-span, .jumble-word-tile').forEach(el => {
+    area.querySelectorAll('input, button, .interactive-tile, .space-span, .letter-span, .jumble-word-tile, .missing-detail-slot').forEach(el => {
         el.disabled = true;
         el.style.pointerEvents = 'none';
         el.style.opacity = '0.75';
@@ -554,12 +560,15 @@ function checkOneByOneItemCompletion() {
 
     let isItemComplete = false;
 
-    if (actType === 'jumbled') {
+    if (actType === 'jumbled' || actType === 'listen-jumbled') {
         const bank = area.querySelector('.jumble-word-bank');
         isItemComplete = bank && bank.children.length === 0;
-    } else if (actType === 'faulty') {
+    } else if (actType === 'faulty' || actType === 'listen-faulty') {
         const block = area.querySelector('.student-item-block');
         isItemComplete = !!(block && block.dataset.faultySolved === 'true');
+    } else if (actType === 'listen-missing') {
+        const block = area.querySelector('.student-item-block');
+        isItemComplete = !!(block && block.dataset.missingSolved === 'true');
     } else if (actType === 'nospaces') {
         const block = area.querySelector('.student-item-block');
         if (block) {
@@ -824,6 +833,37 @@ function getFaultyWordDiff(faultyText, correctText) {
     return { faultyTokens, correctTokens, wrongIndices, correctedIndices };
 }
 
+/* =========================================================
+   MISSING DETAIL WORD REMOVAL HELPER
+   ========================================================= */
+function buildMissingDetailData(targetText, itemIdx) {
+    const rawWords = (targetText || '').trim().split(/\s+/).filter(Boolean);
+    if (rawWords.length === 0) {
+        return { visibleWords: [], removedWord: '', removedIdx: 0 };
+    }
+
+    // Check if teacher explicitly marked a word with *word*
+    let removedIdx = rawWords.findIndex(w => /\*[^*]+\*/.test(w));
+
+    if (removedIdx === -1) {
+        const eligibleIndices = rawWords
+            .map((w, idx) => (w.replace(/[^\p{L}\p{N}]/gu, '').length >= 2 ? idx : -1))
+            .filter(idx => idx !== -1);
+        const pool = eligibleIndices.length > 0
+            ? eligibleIndices
+            : rawWords.map((_, idx) => idx);
+        removedIdx = pool[itemIdx % pool.length];
+    }
+
+    const cleanWord = (w) => w.replace(/\*([^*]+)\*/g, '$1');
+    const removedWord = cleanWord(rawWords[removedIdx]);
+    const visibleWords = rawWords
+        .filter((_, idx) => idx !== removedIdx)
+        .map(cleanWord);
+
+    return { visibleWords, removedWord, removedIdx };
+}
+
 function renderCurrentStudentExercise() {
     clearStudentOneByOneTimers();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
@@ -918,7 +958,7 @@ function renderCurrentStudentExercise() {
 
         let cardContentHTML = '';
 
-       if (actType === 'listen-trad') {
+        if (actType === 'listen-trad') {
             const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
             const savedGapValues = Array.isArray(savedResp?.gapValues) ? savedResp.gapValues : null;
             const gapObj = makeStudentGapHTML(englishText, studentSubItemIndex, 'listen-trad', savedVal, savedGapValues);
@@ -946,7 +986,46 @@ function renderCurrentStudentExercise() {
         else if (actType === 'delayed-copying') {
             cardContentHTML = `<div id="dc-student-stage"></div>`;
         }
-        else if (actType === 'jumbled') {
+        else if (actType === 'listen-missing') {
+            const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
+            const isAlreadySolved = !!(savedResp && savedResp.isDone);
+            const { visibleWords, removedWord, removedIdx } = buildMissingDetailData(targetText, studentSubItemIndex);
+
+            const makeSlotHTML = (slotIdx) => {
+                if (isAlreadySolved) {
+                    if (slotIdx === removedIdx) {
+                        return `<span style="display:inline-block; padding:2px 10px; margin:0 5px; background:#dcfce7; border:2px solid #10b981; border-radius:6px; color:#065f46; font-weight:700;">${removedWord}</span>`;
+                    }
+                    return '';
+                }
+                return `<span class="missing-detail-slot" data-slot-idx="${slotIdx}" title="Click if the missing word belongs here" style="display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border:2px solid #8b5cf6; border-radius:5px; background:#f5f3ff; cursor:pointer; vertical-align:middle; margin:0 6px; transition:all 0.15s ease;"></span>`;
+            };
+
+            let sentenceWithSlotsHTML = makeSlotHTML(0);
+            visibleWords.forEach((word, wIdx) => {
+                sentenceWithSlotsHTML += `<span style="font-weight:700;">${word}</span>${makeSlotHTML(wIdx + 1)}`;
+            });
+
+            cardContentHTML = `
+                <div class="student-item-block"
+                    data-idx="${studentSubItemIndex}"
+                    data-missing-solved="${isAlreadySolved ? 'true' : 'false'}"
+                    data-wrong-attempts="${savedResp?.mistakes || 0}"
+                    data-removed-idx="${removedIdx}"
+                    data-removed-word="${removedWord.replace(/"/g, '&quot;')}"
+                    style="text-align:center; padding:16px 0;">
+                    <button type="button" onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:24px; cursor:pointer;">🔊 Listen Audio</button>
+                    <div class="missing-detail-sentence" style="font-size:25px; color:#1e293b; line-height:2.0; display:flex; flex-wrap:wrap; justify-content:center; align-items:center;">
+                        ${sentenceWithSlotsHTML}
+                    </div>
+                    <div id="missing-detail-feedback" style="min-height:24px; font-weight:bold; font-size:15px; margin-top:16px; color:${isAlreadySolved ? '#10b981' : '#64748b'};">
+                        ${isAlreadySolved ? `✅ Correct! Missing word: "${removedWord}"` : ''}
+                    </div>
+                </div>
+            `;
+            setTimeout(() => speakTL(targetText), 200);
+        }
+        else if (actType === 'jumbled' || actType === 'listen-jumbled') {
             let bankWords = shuffleArray(targetText.split(' '));
             let slotWords = [];
             if (savedVal) {
@@ -958,9 +1037,13 @@ function renderCurrentStudentExercise() {
                 });
                 bankWords = remaining;
             }
+            const promptHeaderHTML = (actType === 'listen-jumbled')
+                ? `<button type="button" onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:22px; cursor:pointer;">🔊 Listen Audio</button>`
+                : `<p style="margin:0 0 18px 0; font-weight:bold; color:#0f172a; font-size:24px;">${englishText}</p>`;
+
             cardContentHTML = `
                 <div class="student-item-block" data-idx="${studentSubItemIndex}" style="text-align:center; padding:10px 0;">
-                    <p style="margin:0 0 18px 0; font-weight:bold; color:#0f172a; font-size:24px;">${englishText}</p>
+                    ${promptHeaderHTML}
                     <div style="display:flex; flex-direction:column; gap:16px; align-items:center;">
                         <div class="jumble-answer-slot">
                             ${slotWords.map(w => `<span class="interactive-tile jumble-word-tile">${w}</span>`).join('')}
@@ -971,6 +1054,9 @@ function renderCurrentStudentExercise() {
                     </div>
                 </div>
             `;
+            if (actType === 'listen-jumbled') {
+                setTimeout(() => speakTL(targetText), 200);
+            }
         }
         else if (actType === 'nospaces') {
             const punctuation = ['.', ',', ';', ':', '!', '?', "'"];
@@ -1071,7 +1157,7 @@ function renderCurrentStudentExercise() {
                 </div>
             `;
         }
-        else if (actType === 'faulty') {
+        else if (actType === 'faulty' || actType === 'listen-faulty') {
             const faultyText = currentSent.faultyTr || getOrGenerateFaultyTr(currentSent);
             const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
             const isAlreadySolved = !!(savedResp && savedResp.isDone);
@@ -1093,6 +1179,10 @@ function renderCurrentStudentExercise() {
                 return `<span class="interactive-tile jumble-word-tile faulty-correct-tile" style="cursor:default; ${highlightStyle}">${w}</span>`;
             }).join('');
 
+            const faultyHeaderHTML = (actType === 'listen-faulty')
+                ? `<button type="button" onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:22px; cursor:pointer;">🔊 Listen Audio</button>`
+                : `<p style="margin:0 0 18px 0; font-weight:bold; color:#0f172a; font-size:24px;">${targetText}</p>`;
+
             cardContentHTML = `
                 <div class="student-item-block"
                     data-idx="${studentSubItemIndex}"
@@ -1102,7 +1192,7 @@ function renderCurrentStudentExercise() {
                     data-clicked-idx="${savedResp?.clickedIdx !== undefined ? savedResp.clickedIdx : -1}"
                     data-wrong-indices="${wrongIndices.join(',')}"
                     style="text-align:center; padding:10px 0;">
-                    <p style="margin:0 0 18px 0; font-weight:bold; color:#0f172a; font-size:24px;">${targetText}</p>
+                    ${faultyHeaderHTML}
                     <div class="faulty-word-bank" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:center; align-items:center; margin-bottom:14px;">
                         ${faultyTilesHTML}
                     </div>
@@ -1114,6 +1204,9 @@ function renderCurrentStudentExercise() {
                     </div>
                 </div>
             `;
+            if (actType === 'listen-faulty') {
+                setTimeout(() => speakTL(targetText), 200);
+            }
         }
         else { // trans-en, trans-target
             let promptText = '';
@@ -1194,7 +1287,7 @@ function renderCurrentStudentExercise() {
         else if (actType === 'vowels' || actType === 'cons') {
             setupAutoAdvanceInputs(area, actType === 'vowels' ? '.vowel-input' : '.cons-input');
         }
-        else if (actType === 'jumbled') {
+        else if (actType === 'jumbled' || actType === 'listen-jumbled') {
             const bank = area.querySelector('.jumble-word-bank');
             const slot = area.querySelector('.jumble-answer-slot');
             if (bank && slot) {
@@ -1211,7 +1304,7 @@ function renderCurrentStudentExercise() {
                 });
             }
         }
-        else if (actType === 'faulty') {
+        else if (actType === 'faulty' || actType === 'listen-faulty') {
             const block = area.querySelector('.student-item-block');
             if (block) {
                 const wrongIndices = (block.dataset.wrongIndices || '')
@@ -1260,6 +1353,57 @@ function renderCurrentStudentExercise() {
                             }
                             setTimeout(() => {
                                 this.classList.remove('wrong-match');
+                            }, 700);
+                            saveStudentCurrentExerciseResponses();
+                        }
+                    };
+                });
+            }
+        }
+        else if (actType === 'listen-missing') {
+            const block = area.querySelector('.student-item-block');
+            if (block) {
+                const removedIdx = parseInt(block.dataset.removedIdx || '-1', 10);
+                const removedWord = block.dataset.removedWord || '';
+                const feedbackEl = document.getElementById('missing-detail-feedback');
+
+                area.querySelectorAll('.missing-detail-slot').forEach(slot => {
+                    slot.onclick = function() {
+                        if (block.dataset.missingSolved === 'true') return;
+
+                        const clickedSlotIdx = parseInt(this.dataset.slotIdx, 10);
+                        if (clickedSlotIdx === removedIdx) {
+                            block.dataset.missingSolved = 'true';
+
+                            // Reveal the missing word in the clicked slot and hide remaining boxes
+                            area.querySelectorAll('.missing-detail-slot').forEach(s => {
+                                if (s === this) {
+                                    s.outerHTML = `<span style="display:inline-block; padding:2px 10px; margin:0 5px; background:#dcfce7; border:2px solid #10b981; border-radius:6px; color:#065f46; font-weight:700;">${removedWord}</span>`;
+                                } else {
+                                    s.style.display = 'none';
+                                }
+                            });
+
+                            if (feedbackEl) {
+                                feedbackEl.style.color = '#10b981';
+                                feedbackEl.innerText = `✅ Correct! Missing word: "${removedWord}"`;
+                            }
+
+                            saveStudentCurrentExerciseResponses();
+                            checkOneByOneItemCompletion();
+                        } else {
+                            block.dataset.wrongAttempts = parseInt(block.dataset.wrongAttempts || '0', 10) + 1;
+                            this.style.borderColor = '#ef4444';
+                            this.style.background = '#fee2e2';
+                            if (feedbackEl) {
+                                feedbackEl.style.color = '#ef4444';
+                                feedbackEl.innerText = '❌ Not here — listen again and click where the missing word goes!';
+                            }
+                            setTimeout(() => {
+                                if (block.dataset.missingSolved !== 'true') {
+                                    this.style.borderColor = '#8b5cf6';
+                                    this.style.background = '#f5f3ff';
+                                }
                             }, 700);
                             saveStudentCurrentExerciseResponses();
                         }
@@ -1751,8 +1895,8 @@ function saveStudentCurrentExerciseResponses() {
             };
         });
     } 
-    // --- JUMBLED ACTIVITY ---
-    else if (actType === 'jumbled') {
+    // --- JUMBLED / LISTEN-JUMBLED ACTIVITY ---
+    else if (actType === 'jumbled' || actType === 'listen-jumbled') {
         const block = area.querySelector('.student-item-block');
         if (block) {
             const slot = block.querySelector('.jumble-answer-slot');
@@ -1768,7 +1912,9 @@ function saveStudentCurrentExerciseResponses() {
             }
 
             responses[studentSubItemIndex] = {
-                prompt: sents[studentSubItemIndex]?.tr || '',
+                prompt: actType === 'listen-jumbled'
+                    ? `🔊 ${sents[studentSubItemIndex]?.t || ''}`
+                    : (sents[studentSubItemIndex]?.tr || ''),
                 studentAnswer: studentText || '(Empty)',
                 correctAnswer: sents[studentSubItemIndex]?.t || '',
                 isCorrect: points === 1.0,
@@ -1936,8 +2082,8 @@ function saveStudentCurrentExerciseResponses() {
             };
         }
     } 
-    // --- FAULTY SENTENCE CORRECTION (CLICK WRONG WORD) ---
-    else if (actType === 'faulty') {
+    // --- FAULTY / LISTEN-FAULTY SENTENCE CORRECTION (CLICK WRONG WORD) ---
+    else if (actType === 'faulty' || actType === 'listen-faulty') {
         const block = area.querySelector('.student-item-block');
         const s = sents[studentSubItemIndex];
         if (block && s) {
@@ -1954,7 +2100,7 @@ function saveStudentCurrentExerciseResponses() {
             }
 
             responses[studentSubItemIndex] = {
-                prompt: `${s.t} — Faulty: "${faultyShown}"`,
+                prompt: `${actType === 'listen-faulty' ? '🔊 ' : ''}${s.t} — Faulty: "${faultyShown}"`,
                 studentAnswer: isDone ? `Clicked "${clickedWord}" → ${correct}` : '(Empty)',
                 correctAnswer: correct || '(No markscheme translation set)',
                 isCorrect: points === 1.0,
@@ -1966,6 +2112,34 @@ function saveStudentCurrentExerciseResponses() {
             };
         }
     } 
+    // --- LISTEN MISSING DETAIL (CLICK MISSING WORD SLOT) ---
+    else if (actType === 'listen-missing') {
+        const block = area.querySelector('.student-item-block');
+        const s = sents[studentSubItemIndex];
+        if (block && s) {
+            const isDone = (block.dataset.missingSolved === 'true');
+            const wrongAttempts = parseInt(block.dataset.wrongAttempts || '0', 10);
+            const removedWord = block.dataset.removedWord || '';
+            const removedIdx = parseInt(block.dataset.removedIdx || '-1', 10);
+
+            let points = 0;
+            if (isDone) {
+                points = (wrongAttempts === 0) ? 1.0 : 0.5;
+            }
+
+            responses[studentSubItemIndex] = {
+                prompt: `🔊 ${s.t}`,
+                studentAnswer: isDone ? `Found missing word "${removedWord}"` : '(Empty)',
+                correctAnswer: `${s.t} (missing: "${removedWord}")`,
+                isCorrect: points === 1.0,
+                points: points,
+                mistakes: wrongAttempts,
+                isDone: isDone,
+                removedWord: removedWord,
+                removedIdx: removedIdx
+            };
+        }
+    }
     // --- STANDARD TYPING TRANSLATIONS ---
     else {
         const s = sents[studentSubItemIndex];
@@ -1987,8 +2161,7 @@ function saveStudentCurrentExerciseResponses() {
         }
     }
 
-
-// Save full payload immediately to localStorage and debounce Firestore sync (1.5s)
+    // Save full payload immediately to localStorage and debounce Firestore sync (1.5s)
     if (!window.isTeacherPreview) {
         saveDraftProgress({ immediate: false });
     }
