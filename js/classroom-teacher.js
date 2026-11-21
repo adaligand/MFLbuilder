@@ -1,6 +1,52 @@
 /* =========================
    TEACHER PREVIEW & ASSIGNMENT ACTIONS
 ========================= */
+function formatDelayedCopyingGapLabel(rawLevel) {
+    const cleaned = String(rawLevel || '1').replace('%', '').trim();
+    const labels = {
+        '1': '1 word',
+        '25': '25% of words',
+        '50': '50% of words',
+        '75': '75% of words',
+        '100': '100% of words'
+    };
+    return labels[cleaned] || '1 word';
+}
+
+function renderTeacherActivityListRows(list, selectedDcGapLevel = '1') {
+    if (typeof buildActivitySelectorRowHTML === 'function') {
+        return list
+            .map(a => buildActivitySelectorRowHTML(a, selectedDcGapLevel, 'display:flex; align-items:center; gap:8px;'))
+            .join('');
+    }
+    const normalized = ['1', '25', '50', '75', '100'].includes(String(selectedDcGapLevel))
+        ? String(selectedDcGapLevel)
+        : '1';
+    const optionsHTML = [
+        { val: '1', label: '1 word' },
+        { val: '25', label: '25% of words' },
+        { val: '50', label: '50% of words' },
+        { val: '75', label: '75% of words' },
+        { val: '100', label: '100% of words' }
+    ].map(o => `<option value="${o.val}" ${o.val === normalized ? 'selected' : ''}>${o.label}</option>`).join('');
+
+    return list.map(a => `
+        <div class="activity-row" style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" value="${a.id}" id="chk-${a.id}" onchange="renderPerActivitySentenceBoxes()">
+            <label for="chk-${a.id}" style="cursor:pointer; font-weight:500;">${a.label}</label>
+            ${a.id === 'delayed-copying' ? `
+                <select id="delayed-copying-gap-select"
+                        onclick="event.stopPropagation()"
+                        onchange="event.stopPropagation(); if (typeof onDelayedCopyingGapLevelChange === 'function') onDelayedCopyingGapLevelChange(this);"
+                        title="Choose how many words are removed in Delayed Copying"
+                        style="margin-left:auto; padding:3px 8px; border-radius:6px; border:1px solid #cbd5e1; font-size:12px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                    ${optionsHTML}
+                </select>
+            ` : ''}
+        </div>
+    `).join('');
+}
+
 async function previewActiveAssignmentAsStudent() {
     window.isTeacherPreview = true;
     const assignmentId = document.getElementById('sub-filter-assignment').value;
@@ -28,7 +74,9 @@ async function previewActiveAssignmentAsStudent() {
     const selectedActivities = currentStudentAssignment.selectedActivities || [];
     studentExerciseTypes = selectedActivities.filter(a => a !== 'study');
     studentCurrentExIndex = 0;
+    studentSubItemIndex = 0;
     studentAnswersState = {};
+    window.studentCompletedExercises = {};
 
     const perActSentences = currentStudentAssignment.sentencesPerActivity || {};
     const hasStudySelected = selectedActivities.includes('study');
@@ -96,12 +144,8 @@ async function duplicateCurrentAssignmentToClass() {
         {id:'delayed-copying', label:'Delayed Copying'}
     ];
 
-    document.getElementById('activity-list').innerHTML = list.map(a => `
-        <div class="activity-row">
-            <input type="checkbox" value="${a.id}" id="chk-${a.id}" onchange="renderPerActivitySentenceBoxes()">
-            <label for="chk-${a.id}" style="cursor:pointer; font-weight:500;">${a.label}</label>
-        </div>
-    `).join('');
+    const savedDcGapLevel = String(assign.delayedCopyingGapLevel || '1').replace('%', '').trim();
+    document.getElementById('activity-list').innerHTML = renderTeacherActivityListRows(list, savedDcGapLevel);
 
     document.getElementById('builder-title').value = assign.title || '';
     
@@ -502,6 +546,9 @@ async function renderStudentSubmissionsTable() {
             document.getElementById('active-task-title').innerText = assign.title || "Untitled Assignment";
             
             let metaText = `Language: ${assign.lang || 'N/A'} | Max Score: ${assign.maxPoints || 10}`;
+            if (Array.isArray(assign.selectedActivities) && assign.selectedActivities.includes('delayed-copying')) {
+                metaText += ` | Delayed Copying: ${formatDelayedCopyingGapLabel(assign.delayedCopyingGapLevel)}`;
+            }
             if (assign.dueDate) {
                 metaText += ` | Due: ${new Date(assign.dueDate).toLocaleString([], {dateStyle:'short', timeStyle:'short'})}`;
             }
@@ -598,12 +645,8 @@ async function editCurrentAssignment() {
         {id:'delayed-copying', label:'Delayed Copying'}
     ];
 
-    document.getElementById('activity-list').innerHTML = list.map(a => `
-        <div class="activity-row">
-            <input type="checkbox" value="${a.id}" id="chk-${a.id}" onchange="renderPerActivitySentenceBoxes()">
-            <label for="chk-${a.id}" style="cursor:pointer; font-weight:500;">${a.label}</label>
-        </div>
-    `).join('');
+    const savedDcGapLevel = String(assign.delayedCopyingGapLevel || '1').replace('%', '').trim();
+    document.getElementById('activity-list').innerHTML = renderTeacherActivityListRows(list, savedDcGapLevel);
 
     document.getElementById('builder-title').value = assign.title || '';
     
