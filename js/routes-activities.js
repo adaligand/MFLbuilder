@@ -1064,6 +1064,14 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
 
     if (overrideSentencesMap) {
         window.editingSavedSentencesMap = overrideSentencesMap;
+    } else {
+        const domMap = getCurrentSentencesMapFromDOM();
+        if (Object.keys(domMap).length > 0) {
+            window.editingSavedSentencesMap = {
+                ...(window.editingSavedSentencesMap || {}),
+                ...domMap
+            };
+        }
     }
 
     const savedMap = window.editingSavedSentencesMap || null;
