@@ -1,7 +1,7 @@
 /* =========================
    TEACHER PREVIEW & ASSIGNMENT ACTIONS
 ========================= */
-const TEACHER_GAP_DROPDOWN_ACTIVITIES = ['listen-dictation', 'delayed-dictation', 'delayed-copying'];
+const TEACHER_GAP_DROPDOWN_ACTIVITIES = ['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'];
 
 function formatGapLevelLabel(rawLevel) {
     const cleaned = String(rawLevel || '1').replace('%', '').trim();
@@ -28,6 +28,9 @@ function normalizeGapLevelValue(rawLevel) {
 function getAssignmentGapLevelMap(assign = {}) {
     const gapLevelsObj = assign.activityGapLevels || assign.gapLevels || {};
     return {
+        'listen-trad': normalizeGapLevelValue(
+            assign.listenTradGapLevel ?? gapLevelsObj['listen-trad'] ?? '1'
+        ),
         'listen-dictation': normalizeGapLevelValue(
             assign.listenDictationGapLevel ?? gapLevelsObj['listen-dictation'] ?? '1'
         ),
@@ -43,16 +46,17 @@ function getAssignmentGapLevelMap(assign = {}) {
 function renderTeacherActivityListRows(list, selectedGapLevels = '1') {
     const gapMap = (selectedGapLevels && typeof selectedGapLevels === 'object')
         ? {
+            'listen-trad': normalizeGapLevelValue(selectedGapLevels['listen-trad'] || '1'),
             'listen-dictation': normalizeGapLevelValue(selectedGapLevels['listen-dictation'] || '1'),
             'delayed-dictation': normalizeGapLevelValue(selectedGapLevels['delayed-dictation'] || '1'),
             'delayed-copying': normalizeGapLevelValue(selectedGapLevels['delayed-copying'] || '1')
         }
         : {
+            'listen-trad': '1',
             'listen-dictation': '1',
             'delayed-dictation': '1',
             'delayed-copying': normalizeGapLevelValue(selectedGapLevels)
         };
-
     const buildOptionsHTML = (selectedVal) => [
         { val: '1', label: '1 word' },
         { val: '25', label: '25% of words' },
@@ -102,6 +106,7 @@ async function previewActiveAssignmentAsStudent() {
     currentStudentAssignment = {
         ...rawAssign,
         id: assignmentId,
+        listenTradGapLevel: gapMap['listen-trad'],
         listenDictationGapLevel: gapMap['listen-dictation'],
         delayedDictationGapLevel: gapMap['delayed-dictation'],
         delayedCopyingGapLevel: gapMap['delayed-copying'],
@@ -614,6 +619,9 @@ async function renderStudentSubmissionsTable() {
             }
             if (selActs.includes('delayed-copying')) {
                 metaText += ` | Delayed Copying: ${formatGapLevelLabel(gapMap['delayed-copying'])}`;
+            }
+           if (selActs.includes('listen-trad')) {
+                metaText += ` | Listen / Translate: ${formatGapLevelLabel(gapMap['listen-trad'])}`;
             }
             if (assign.dueDate) {
                 metaText += ` | Due: ${new Date(assign.dueDate).toLocaleString([], {dateStyle:'short', timeStyle:'short'})}`;
