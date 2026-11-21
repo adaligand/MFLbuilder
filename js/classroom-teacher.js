@@ -26,7 +26,7 @@ function normalizeGapLevelValue(rawLevel) {
 }
 
 function getAssignmentGapLevelMap(assign = {}) {
-    const gapLevelsObj = assign.gapLevels || {};
+    const gapLevelsObj = assign.activityGapLevels || assign.gapLevels || {};
     return {
         'listen-dictation': normalizeGapLevelValue(
             assign.listenDictationGapLevel ?? gapLevelsObj['listen-dictation'] ?? '1'
@@ -74,7 +74,7 @@ function renderTeacherActivityListRows(list, selectedGapLevels = '1') {
                     <select id="${selectId}"
                             data-gap-activity="${a.id}"
                             onclick="event.stopPropagation()"
-                            onchange="event.stopPropagation(); if (typeof onActivityGapLevelChange === 'function') { onActivityGapLevelChange(this, '${a.id}'); } else if ('${a.id}' === 'delayed-copying' && typeof onDelayedCopyingGapLevelChange === 'function') { onDelayedCopyingGapLevelChange(this); }"
+                            onchange="event.stopPropagation(); if (typeof onActivityGapLevelChange === 'function') { onActivityGapLevelChange('${a.id}', this); } else if ('${a.id}' === 'delayed-copying' && typeof onDelayedCopyingGapLevelChange === 'function') { onDelayedCopyingGapLevelChange(this); }"
                             title="Choose how many words are removed in ${a.label.replace(/^🎧\s*/, '')}"
                             style="margin-left:auto; padding:3px 8px; border-radius:6px; border:1px solid #cbd5e1; font-size:12px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
                         ${buildOptionsHTML(selectedVal)}
@@ -87,16 +87,34 @@ function renderTeacherActivityListRows(list, selectedGapLevels = '1') {
 
 async function previewActiveAssignmentAsStudent() {
     window.isTeacherPreview = true;
+    if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+
     const assignmentId = document.getElementById('sub-filter-assignment').value;
     if (!assignmentId) return alert("Select an assignment first.");
 
     const doc = await db.collection("assignments").doc(assignmentId).get();
     if (!doc.exists) return alert("Assignment not found.");
 
-    currentStudentAssignment = doc.data();
-    currentStudentAssignment.id = assignmentId;
+    const rawAssign = doc.data();
+    const gapMap = getAssignmentGapLevelMap(rawAssign);
+
+    currentStudentAssignment = {
+        ...rawAssign,
+        id: assignmentId,
+        listenDictationGapLevel: gapMap['listen-dictation'],
+        delayedDictationGapLevel: gapMap['delayed-dictation'],
+        delayedCopyingGapLevel: gapMap['delayed-copying'],
+        activityGapLevels: {
+            ...(rawAssign.activityGapLevels || {}),
+            ...gapMap
+        }
+    };
 
     showPage('student-portal-page');
+
+    const taskTitleEl = document.getElementById('student-task-title');
+    if (taskTitleEl) taskTitleEl.innerText = currentStudentAssignment.title || "Interactive Practice";
 
     const previewBanner = document.getElementById('teacher-preview-banner');
     if (previewBanner) previewBanner.style.display = 'flex';
@@ -141,6 +159,9 @@ async function previewActiveAssignmentAsStudent() {
 
 function exitTeacherPreview() {
     window.isTeacherPreview = false;
+    if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+
     const previewBanner = document.getElementById('teacher-preview-banner');
     if (previewBanner) previewBanner.style.display = 'none';
 
@@ -268,6 +289,8 @@ async function downloadActiveAssignmentWorksheet() {
     let exerciseCounter = 1;
 
     selectedActs.forEach((type) => {
+        if (['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'].includes(type)) return;
+
         const isStudy = (type === 'study');
         const boxTitle = isStudy ? "Sentence Table" : ("Exercise " + exerciseCounter + ": " + getCleanActivityTitle(type, docLang));
         if (!isStudy) exerciseCounter++;
@@ -516,13 +539,11 @@ async function loadCourseAssignments(courseId) {
     }
 
     try {
-        // Query courseId field (matches Firestore assignments schema)
         let snap = await db.collection("assignments")
             .where("courseId", "==", courseId)
             .get();
 
         if (snap.empty) {
-            // Fallback check for classroomCourseId if legacy assignments exist
             snap = await db.collection("assignments")
                 .where("classroomCourseId", "==", courseId)
                 .get();
@@ -536,10 +557,8 @@ async function loadCourseAssignments(courseId) {
             return;
         }
 
-        // Convert Firestore docs to an array
         const docsData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        // Sort descending by creation date (latest set date at the top)
         docsData.sort((a, b) => {
             const getTimestamp = (item) => {
                 const d = item.createdAt || item.updatedAt;
@@ -714,6 +733,11 @@ async function editCurrentAssignment() {
     const sentCountSelect = document.getElementById('sentence-count');
     if (sentCountSelect) sentCountSelect.value = String(detectedCount);
 
+    if (assign.sentencesPerActivity && assign.sentencesPerActivity['study']) {
+        const tableCountSelect = document.getElementById('table-sentence-count');
+        if (tableCountSelect) tableCountSelect.value = String(assign.sentencesPerActivity['study'].length);
+    }
+
     renderPerActivitySentenceBoxes(assign.sentencesPerActivity || null);
 
     document.getElementById('activity-menu').style.display = 'flex';
@@ -773,20 +797,17 @@ async function deleteCurrentAssignment() {
             }
         }
 
-        // 1. Query all submissions and drafts linked to this assignment
         const [submissionsSnap, draftsSnap] = await Promise.all([
             db.collection("submissions").where("assignmentId", "==", assignmentId).get(),
             db.collection("drafts").where("assignmentId", "==", assignmentId).get()
         ]);
 
-        // 2. Collect all document references (assignment + submissions + drafts)
         const refsToDelete = [
             db.collection("assignments").doc(assignmentId),
             ...submissionsSnap.docs.map(d => d.ref),
             ...draftsSnap.docs.map(d => d.ref)
         ];
 
-        // 3. Delete in batches (Firestore caps batches at 500 operations)
         for (let i = 0; i < refsToDelete.length; i += 450) {
             const batch = db.batch();
             refsToDelete.slice(i, i + 450).forEach(ref => batch.delete(ref));
@@ -820,7 +841,6 @@ async function syncAllClassroomGrades() {
         const snap = await db.collection("submissions").where("assignmentId", "==", assignmentId).get();
         if (snap.empty) return alert("No student submissions found to sync.");
 
-        // Pre-fetch assignment details and Classroom roster once for the whole class
         const assignDoc = await db.collection("assignments").doc(assignmentId).get();
         const assign = assignDoc.exists ? assignDoc.data() : null;
 
@@ -1015,7 +1035,7 @@ async function saveAndSyncGrade(subId, options = {}) {
             totalPossible: possibleVal,
             percentage: pct,
             teacherComment: commentVal,
-            isReviewed: true // Releases reviewed mark & feedback to student portal
+            isReviewed: true
         });
 
         const subDoc = await db.collection("submissions").doc(subId).get();
