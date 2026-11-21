@@ -23,14 +23,17 @@ function getDelayedCopyingGapOptionsHTML(selectedLevel = '1') {
     return getActivityGapOptionsHTML(selectedLevel);
 }
 
-function onActivityGapLevelChange(actId, selectEl) {
+function onActivityGapLevelChange(arg1, arg2) {
+    const actId = (typeof arg1 === 'string') ? arg1 : arg2;
+    const selectEl = (typeof arg1 === 'string') ? arg2 : arg1;
+
     const chk = document.getElementById(`chk-${actId}`);
     if (chk && !chk.checked) {
         chk.checked = true;
         renderPerActivitySentenceBoxes();
         return;
     }
-    const label = selectEl?.options[selectEl.selectedIndex]?.text || '1 word';
+    const label = selectEl?.options?.[selectEl.selectedIndex]?.text || '1 word';
     const badge = document.getElementById(`${actId}-card-gap-badge`);
     if (badge) {
         badge.innerText = `(${label} removed)`;
