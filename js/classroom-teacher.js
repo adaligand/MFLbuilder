@@ -205,7 +205,10 @@ async function duplicateCurrentAssignmentToClass() {
         {id:'listen-trad', label:'🎧 Listen / Translate'},
         {id:'listen-dictation', label:'🎧 Listening Dictation'},
         {id:'delayed-dictation', label:'🎧 Delayed Dictation'},
-        {id:'delayed-copying', label:'Delayed Copying'}
+        {id:'delayed-copying', label:'Delayed Copying'},
+        {id:'listen-missing', label:'🎧 Missing Detail'},
+        {id:'listen-faulty', label:'🎧 Faulty Translation'},
+        {id:'listen-jumbled', label:'🎧 Unjumble'}
     ];
 
     const savedGapLevels = getAssignmentGapLevelMap(assign);
@@ -294,7 +297,7 @@ async function downloadActiveAssignmentWorksheet() {
     let exerciseCounter = 1;
 
     selectedActs.forEach((type) => {
-        if (['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'].includes(type)) return;
+        if (['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying', 'listen-missing', 'listen-faulty', 'listen-jumbled'].includes(type)) return;
 
         const isStudy = (type === 'study');
         const boxTitle = isStudy ? "Sentence Table" : ("Exercise " + exerciseCounter + ": " + getCleanActivityTitle(type, docLang));
@@ -620,7 +623,7 @@ async function renderStudentSubmissionsTable() {
             if (selActs.includes('delayed-copying')) {
                 metaText += ` | Delayed Copying: ${formatGapLevelLabel(gapMap['delayed-copying'])}`;
             }
-           if (selActs.includes('listen-trad')) {
+            if (selActs.includes('listen-trad')) {
                 metaText += ` | Listen / Translate: ${formatGapLevelLabel(gapMap['listen-trad'])}`;
             }
             if (assign.dueDate) {
@@ -716,7 +719,10 @@ async function editCurrentAssignment() {
         {id:'listen-trad', label:'🎧 Listen / Translate'},
         {id:'listen-dictation', label:'🎧 Listening Dictation'},
         {id:'delayed-dictation', label:'🎧 Delayed Dictation'},
-        {id:'delayed-copying', label:'Delayed Copying'}
+        {id:'delayed-copying', label:'Delayed Copying'},
+        {id:'listen-missing', label:'🎧 Missing Detail'},
+        {id:'listen-faulty', label:'🎧 Faulty Translation'},
+        {id:'listen-jumbled', label:'🎧 Unjumble'}
     ];
 
     const savedGapLevels = getAssignmentGapLevelMap(assign);
