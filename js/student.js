@@ -1330,7 +1330,9 @@ function navigateOneByOneItem(direction) {
     if (studentSubItemIndex < 0) studentSubItemIndex = 0;
     if (studentSubItemIndex >= sents.length) studentSubItemIndex = sents.length - 1;
 
-    saveDraftProgress({ immediate: false });
+    if (!window.isTeacherPreview) {
+        saveDraftProgress({ immediate: false });
+    }
     renderCurrentStudentExercise();
 }
 
@@ -1976,8 +1978,11 @@ function saveStudentCurrentExerciseResponses() {
         }
     }
 
-    // Save full payload immediately to localStorage and debounce Firestore sync (1.5s)
-    saveDraftProgress({ immediate: false });
+
+// Save full payload immediately to localStorage and debounce Firestore sync (1.5s)
+    if (!window.isTeacherPreview) {
+        saveDraftProgress({ immediate: false });
+    }
 }
 
 function nextStudentExercise() {
@@ -1988,7 +1993,9 @@ function nextStudentExercise() {
         }
     }
     saveStudentCurrentExerciseResponses();
-    saveDraftProgress();
+    if (!window.isTeacherPreview) {
+        saveDraftProgress();
+    }
     if (studentCurrentExIndex < studentExerciseTypes.length - 1) {
         studentCurrentExIndex++;
         studentSubItemIndex = 0;
@@ -1998,7 +2005,9 @@ function nextStudentExercise() {
 
 function prevStudentExercise() {
     saveStudentCurrentExerciseResponses();
-    saveDraftProgress();
+    if (!window.isTeacherPreview) {
+        saveDraftProgress();
+    }
     if (studentCurrentExIndex > 0) {
         studentCurrentExIndex--;
         studentSubItemIndex = 0;
