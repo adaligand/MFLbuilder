@@ -231,7 +231,7 @@ function hideSentenceTableCountControl() {
 }
 
 /* =========================
-   ACTIVITY MENU COLUMN WIDTHS, HEADER CONTROLS & TIME ESTIMATE
+   ACTIVITY MENU COLUMN WIDTHS, HEADER CONTROLS & LEARNER TIME ESTIMATE
 ========================= */
 function arrangeActivityMenuLayout() {
     const menu = document.getElementById('activity-menu');
@@ -333,6 +333,11 @@ function arrangeActivityMenuLayout() {
     }
 }
 
+/**
+ * Estimates completion time in seconds for a single item from the perspective
+ * of a foreign-language learner (word-by-word decoding, audio replays, accent/grammar
+ * recall, mistake feedback, and self-correction retries).
+ */
 function estimateSingleSentenceSeconds(actId, sentenceObj) {
     const targetText = (sentenceObj?.t || '').replace(/\*/g, '').trim();
     const engText = (sentenceObj?.tr || '').replace(/\*/g, '').trim();
@@ -341,59 +346,97 @@ function estimateSingleSentenceSeconds(actId, sentenceObj) {
     const words = refText ? refText.split(/\s+/).filter(Boolean).length : 6;
     const chars = refText.replace(/\s+/g, '').length || (words * 5);
 
-    // Spoken audio duration (~0.45s per word + 1.2s player start)
-    const audioSec = 1.2 + (words * 0.45);
+    // Learner decoding time to read a foreign sentence word-by-word (~0.95s/word)
+    const l2ReadSec = 2.5 + (words * 0.95);
+    // Single audio playback duration (~0.5s/word + player latency)
+    const singleAudioPlaySec = 1.4 + (words * 0.5);
 
-    const getGapWordCount = (id) => {
+    const getGapStats = (id) => {
         const lvl = document.getElementById(`${id}-gap-select`)?.value || '1';
-        if (lvl === '1') return 1;
+        if (lvl === '1') return { count: 1, pct: Math.min(100, Math.round(100 / Math.max(1, words))) };
         const pct = parseInt(lvl, 10) || 25;
-        return Math.max(1, Math.round(words * (pct / 100)));
+        return { count: Math.max(1, Math.round(words * (pct / 100))), pct };
     };
 
     switch (actId) {
         case 'match':
-            // Scanned together as a matching table rather than 1-by-1
-            return 4.0 + (words * 0.6);
+            // Scanning & comparing similar L2 sentences against shuffled English distractors
+            return 7.0 + (words * 1.1);
+
         case 'faulty':
-            return 5.0 + (words * 0.7);
+            // Reading L2 + comparing word-for-word against tricky English distractor + typing fix
+            return l2ReadSec + 7.5 + (words * 0.8);
+
         case 'listen-faulty':
-            return audioSec + 4.5 + (words * 0.5);
+            // Typically 2.5 listens to catch the subtle mismatch + typing corrected English
+            return (singleAudioPlaySec * 2.5) + 7.5 + (words * 0.7);
+
         case 'listen-missing':
-            return audioSec + 5.0 + (words * 0.6);
+            // 2.5 listens + reading gapped L2 + recalling/spelling omitted L2 word(s) + error check
+            return (singleAudioPlaySec * 2.5) + l2ReadSec + 7.5;
+
         case 'nospaces':
-            return 4.0 + (words * 1.4);
+            // Segmenting unspaced L2 string, identifying apostrophes/accents, typing & fixing typos
+            return 6.0 + (words * 2.8);
+
         case 'jumbled':
-            return 4.0 + (words * 1.5);
+            // Reconstructing L2 word order/syntax + typing/ordering + fixing order mistakes
+            return 7.0 + (words * 3.0);
+
         case 'listen-jumbled':
-            return audioSec + 4.5 + (words * 1.5);
+            // 2.5 listens + arranging scrambled L2 chunks + verifying word order
+            return (singleAudioPlaySec * 2.5) + 6.5 + (words * 2.4);
+
         case 'gap-en':
+            // Reading/translating L2 sentence for context + recalling & typing missing English word
+            return l2ReadSec + 6.5;
+
         case 'gap-t':
-            return 8.5 + (words * 0.6);
+            // Reading English + L2 context + recalling L2 spelling/accents/agreement + fixing typos
+            return l2ReadSec + 9.5;
+
         case 'vowels':
         case 'cons':
-            return 4.5 + (chars * 0.34);
-        case 'listen-trad':
+            // Reconstructing every word from partial letter skeleton + recalling accents/endings
+            return 7.0 + (chars * 0.65);
+
+        case 'listen-trad': {
+            const { count, pct } = getGapStats(actId);
+            // More missing English words = more replays & longer translation recall
+            const replays = pct >= 75 ? 3.2 : (pct >= 25 ? 2.6 : 2.0);
+            return (singleAudioPlaySec * replays) + 5.0 + (count * 2.9);
+        }
+
         case 'listen-dictation': {
-            const gapped = getGapWordCount(actId);
-            return audioSec + 4.5 + (gapped * 2.2);
+            const { count, pct } = getGapStats(actId);
+            // Foreign-language dictation requires multiple listens + phonetic-to-spelling recall + accent fixes
+            const replays = pct >= 75 ? 3.5 : (pct >= 25 ? 2.8 : 2.2);
+            return (singleAudioPlaySec * replays) + 5.5 + (count * 4.4);
         }
+
         case 'delayed-dictation': {
-            // Includes built-in 3s memorise delay
-            const gapped = getGapWordCount(actId);
-            return audioSec + 3.0 + 4.0 + (gapped * 2.4);
+            const { count, pct } = getGapStats(actId);
+            // Includes built-in 3s hold timer + multiple listens + holding in L2 working memory + spelling/retries
+            const replays = pct >= 75 ? 3.2 : (pct >= 25 ? 2.5 : 2.0);
+            return (singleAudioPlaySec * replays) + 3.0 + 6.0 + (count * 4.6);
         }
+
         case 'delayed-copying': {
-            // Includes built-in 7s reading + 3s memorise = 10s fixed countdown
-            const gapped = getGapWordCount(actId);
-            return 10.0 + 2.5 + (gapped * 2.4);
+            const { count } = getGapStats(actId);
+            // Includes fixed 10s study/memorise countdown + typing L2 from short-term memory + fixing mistakes
+            return 10.0 + 4.5 + (count * 4.4);
         }
+
         case 'trans-en':
-            return 5.0 + (words * 1.8);
+            // Decoding full L2 sentence + writing natural English + checking meaning
+            return l2ReadSec + 4.5 + (words * 2.1);
+
         case 'trans-target':
-            return 6.0 + (words * 2.6);
+            // Hardest productive task: recalling L2 vocab, syntax, conjugations, agreements, accents + retries
+            return 7.5 + (words * 4.4);
+
         default:
-            return 6.0 + (words * 1.5);
+            return 8.0 + (words * 3.0);
     }
 }
 
@@ -417,9 +460,12 @@ function updateAssignmentTimeEstimate() {
     let totalSeconds = 0;
     let totalItems = 0;
     let totalWords = 0;
+    const perActivitySummary = [];
 
     checkedBoxes.forEach(cb => {
         const actId = cb.value;
+        const actLabel = document.querySelector(`label[for="${cb.id}"]`)?.innerText?.trim() || actId;
+
         let sents = (domMap[actId] && domMap[actId].length > 0)
             ? domMap[actId]
             : ((window.editingSavedSentencesMap && window.editingSavedSentencesMap[actId] && window.editingSavedSentencesMap[actId].length > 0)
@@ -430,21 +476,35 @@ function updateAssignmentTimeEstimate() {
             sents = Array.from({ length: limit }, () => ({ t: 'sample sentence of six words', tr: '' }));
         }
 
+        // +15s per activity block for reading exercise instructions & switching task mode
+        let actSeconds = 15;
         sents.forEach(s => {
-            totalSeconds += estimateSingleSentenceSeconds(actId, s);
+            actSeconds += estimateSingleSentenceSeconds(actId, s);
             const wCount = ((s?.t || s?.tr || '').replace(/\*/g, '').trim().split(/\s+/).filter(Boolean).length) || 6;
             totalWords += wCount;
             totalItems += 1;
         });
+
+        totalSeconds += actSeconds;
+        perActivitySummary.push(`• ${actLabel}: ~${Math.max(1, Math.round(actSeconds / 60))} min`);
     });
 
-    const totalMinutes = Math.max(1, Math.round(totalSeconds / 60));
+    const lowMins = Math.max(1, Math.round((totalSeconds * 0.9) / 60));
+    const highMins = Math.max(lowMins, Math.round((totalSeconds * 1.15) / 60));
     const avgWords = totalItems > 0 ? (totalWords / totalItems).toFixed(1) : '0';
 
-    estBadge.textContent = totalMinutes === 1
-        ? '⏱️ Est. time: ~1 min'
-        : `⏱️ Est. time: ~${totalMinutes} mins`;
-    estBadge.title = `Based on ${checkedBoxes.length} activit${checkedBoxes.length === 1 ? 'y' : 'ies'}, ${limit} sentence${limit === 1 ? '' : 's'}/exercise, and avg. ${avgWords} words/sentence.`;
+    if (lowMins === highMins) {
+        estBadge.textContent = lowMins === 1
+            ? '⏱️ Est. time: ~1 min'
+            : `⏱️ Est. time: ~${lowMins} mins`;
+    } else {
+        estBadge.textContent = `⏱️ Est. time: ~${lowMins}–${highMins} mins`;
+    }
+
+    estBadge.title = [
+        `Realistic L2 learner estimate (${checkedBoxes.length} activit${checkedBoxes.length === 1 ? 'y' : 'ies'}, ${limit} sentences/exercise, avg. ${avgWords} words/sentence — includes audio replays & error retries):`,
+        ...perActivitySummary
+    ].join('\n');
 }
 
 function ensureGroupedActivityList() {
