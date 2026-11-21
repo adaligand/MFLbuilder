@@ -6,13 +6,15 @@ let isAnswerRevealed = false;
 let classDisplaySentences = []; // Holds the randomized sentence list
 // Live games timer reference & sentence processing helpers
 let cdTimer = null;
+// Top-level state (lines 11-13)
 let currentCDGapText = null;
 let currentCDTargetText = '';
+let currentCDEnglishText = '';
 let cdGridTimerInterval = null;
 let cdGridRemainingSeconds = 300;
 let cdGridIsRunning = false;
 
-const CD_GAP_SUPPORTED_MODES = ['listen-dictation', 'delayed-dictation', 'delayed-copying'];
+const CD_GAP_SUPPORTED_MODES = ['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'];
 
 function clearCDTimer() {
     if (cdTimer) {
@@ -239,10 +241,21 @@ function getCDDelayedCopyingGapLevel() {
 
 function handleCDGapChange() {
     const mode = document.getElementById('class-display-game-select')?.value;
-    if (!CD_GAP_SUPPORTED_MODES.includes(mode) || !currentCDTargetText) return;
+    if (!CD_GAP_SUPPORTED_MODES.includes(mode)) return;
+
+    const sourceText = (mode === 'listen-trad') ? currentCDEnglishText : currentCDTargetText;
+    if (!sourceText) return;
 
     const gapLevel = getCDGapLevel();
-    currentCDGapText = removeWordsFromSentence(currentCDTargetText, gapLevel);
+    currentCDGapText = removeWordsFromSentence(sourceText, gapLevel);
+
+    if (mode === 'listen-trad') {
+        const tradEl = document.getElementById('cd-listen-trad-text');
+        if (tradEl) {
+            tradEl.innerHTML = currentCDGapText;
+        }
+        return;
+    }
 
     if (mode === 'listen-dictation') {
         const listenEl = document.getElementById('cd-listen-dictation-text');
@@ -506,6 +519,7 @@ function playClassDisplayGame() {
     const englishText = cleanEnglishText(item.tr || item.en || item.english || '');
     const safeTarget = targetText.replace(/'/g, "\\'").replace(/"/g, '&quot;');
     currentCDTargetText = targetText;
+    currentCDEnglishText = englishText;
 
     let questionHTML = '';
     let answerHTML = '';
@@ -541,12 +555,13 @@ function playClassDisplayGame() {
         questionHTML = `<div class="cd-question-text">${words.join(' &nbsp;•&nbsp; ')}</div>`;
         answerHTML = `<div id="cd-answer-box" class="cd-answer-text" style="display: ${isAnswerRevealed ? 'block' : 'none'};">${targetText}<div style="font-size: 3.2rem; font-weight: 600; margin-top: 10px; color: #16a34a;">${englishText}</div></div>`;
     }
-    // 2. Listen / Trad
+  
+    // 2. Listen / Trad (uses selected word count/percentage)
     else if (mode === 'listen-trad') {
-        const gapEnglish = removeWordsFromSentence(englishText, '1');
+        currentCDGapText = removeWordsFromSentence(englishText, getCDGapLevel());
         questionHTML = `
             <button onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size: 24px; padding: 12px 32px; margin-bottom: 25px;">🔊 Listen</button>
-            <div class="cd-question-text">${gapEnglish}</div>
+            <div id="cd-listen-trad-text" class="cd-question-text">${currentCDGapText}</div>
         `;
     }
 
