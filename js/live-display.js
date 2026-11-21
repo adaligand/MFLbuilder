@@ -618,8 +618,13 @@ function startDelayedDictation(targetText, isReattempt = false) {
     const startBtn = document.getElementById('cd-start-dd-btn');
     const reattemptBtn = document.getElementById('cd-reattempt-btn');
 
+    const wasRevealed = isAnswerRevealed;
+    isAnswerRevealed = false;
+    const revealBtn = document.getElementById('cd-reveal-btn');
+    if (revealBtn) revealBtn.innerHTML = '🔍 Reveal';
+
     // Generate gap text using selected word count/percentage on the first attempt
-    if (!isReattempt || !currentCDGapText) {
+    if (!isReattempt || !currentCDGapText || wasRevealed) {
         currentCDGapText = removeWordsFromSentence(targetText, getCDGapLevel());
     }
 
@@ -662,8 +667,13 @@ function startDelayedCopyingSequence(targetText, isReattempt = false) {
     const textEl = document.getElementById('cd-copy-text');
     const reattemptBtn = document.getElementById('cd-reattempt-btn');
 
-    // Generate gap text only on the first attempt
-    if (!isReattempt || !currentCDGapText) {
+    const wasRevealed = isAnswerRevealed;
+    isAnswerRevealed = false;
+    const revealBtn = document.getElementById('cd-reveal-btn');
+    if (revealBtn) revealBtn.innerHTML = '🔍 Reveal';
+
+    // Generate gap text using selected word count/percentage on the first attempt
+    if (!isReattempt || !currentCDGapText || wasRevealed) {
         currentCDGapText = removeWordsFromSentence(targetText, getCDGapLevel());
     }
 
