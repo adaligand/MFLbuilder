@@ -75,7 +75,7 @@ function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle 
                 onclick="event.stopPropagation()"
                 onchange="event.stopPropagation(); onActivityGapLevelChange('${a.id}', this)"
                 title="Choose how many words are removed in ${a.label}"
-                style="margin-left:auto; flex-shrink:0; max-width:104px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
                 ${getActivityGapOptionsHTML(selectedLevel)}
            </select>`
         : '';
@@ -142,7 +142,7 @@ function applyActivityListLayoutOverrides() {
         const sel = row.querySelector('select');
         if (sel) {
             sel.style.flexShrink = '0';
-            sel.style.maxWidth = '104px';
+            sel.style.maxWidth = '112px';
             sel.style.padding = '2px 5px';
             sel.style.fontSize = '11px';
         }
@@ -216,17 +216,39 @@ function updateActivityCategoryCounts(autoExpandChecked = false) {
     });
 }
 
+function pruneEmptyAncestorBoxes(startEl, stopBoundaryEl) {
+    let curr = startEl;
+    while (curr && curr !== stopBoundaryEl && curr !== document.body) {
+        const parent = curr.parentElement;
+        const hasInteractive = curr.querySelectorAll('button, input, select, textarea').length > 0;
+        const hasText = (curr.textContent || '').trim().length > 0;
+        if (!hasInteractive && !hasText) {
+            curr.remove();
+            curr = parent;
+        } else {
+            break;
+        }
+    }
+}
+
 function hideSentenceTableCountControl() {
     const tableCountSelect = document.getElementById('table-sentence-count');
     if (!tableCountSelect) return;
 
+    const menu = document.getElementById('activity-menu') || document.body;
     const rowWrapper = tableCountSelect.parentElement;
     if (rowWrapper && !rowWrapper.querySelector('#sentence-count')) {
-        rowWrapper.style.display = 'none';
+        const parent = rowWrapper.parentElement;
+        rowWrapper.remove();
+        pruneEmptyAncestorBoxes(parent, menu);
     } else {
-        tableCountSelect.style.display = 'none';
+        tableCountSelect.remove();
         const lbl = document.querySelector('label[for="table-sentence-count"]');
-        if (lbl) lbl.style.display = 'none';
+        if (lbl) {
+            const lblParent = lbl.parentElement;
+            lbl.remove();
+            pruneEmptyAncestorBoxes(lblParent, menu);
+        }
     }
 }
 
@@ -239,24 +261,31 @@ function removeStraySentenceCountFromCol3(col3) {
     col3.querySelectorAll('label[for="sentence-count"], label[for="table-sentence-count"], #table-sentence-count').forEach(el => {
         const parent = el.parentElement;
         el.remove();
-        if (parent && parent !== col3 && parent.children.length === 0 && (parent.textContent || '').trim() === '') {
-            parent.remove();
-        }
+        pruneEmptyAncestorBoxes(parent, col3);
     });
 
     Array.from(col3.querySelectorAll('label, span, div, p')).forEach(el => {
         if (el.children.length === 0 && /^(Exercise\s+)?Sentence(\s+Table)?\s+Count\s*:?$/i.test((el.textContent || '').trim())) {
             const parent = el.parentElement;
             el.remove();
-            if (parent && parent !== col3 && parent.children.length === 0 && (parent.textContent || '').trim() === '') {
-                parent.remove();
-            }
+            pruneEmptyAncestorBoxes(parent, col3);
         }
     });
 
     Array.from(col3.childNodes).forEach(node => {
         if (node.nodeType === Node.TEXT_NODE && /^(Exercise\s+)?Sentence(\s+Table)?\s+Count\s*:?$/i.test((node.textContent || '').trim())) {
             node.remove();
+        }
+    });
+
+    // Remove any remaining empty white card/box wrappers in Column 3 (excluding the Classroom fields drawer)
+    const assignFields = document.getElementById('classroom-assign-fields');
+    Array.from(col3.querySelectorAll('div, p, label, span')).reverse().forEach(el => {
+        if (assignFields && (el === assignFields || assignFields.contains(el))) return;
+        const hasInteractive = el.querySelectorAll('button, input, select, textarea').length > 0;
+        const hasText = (el.textContent || '').trim().length > 0;
+        if (!hasInteractive && !hasText) {
+            el.remove();
         }
     });
 }
@@ -295,7 +324,7 @@ function arrangeActivityMenuLayout() {
 
         const wrapperDisplay = window.getComputedStyle(columnsWrapper).display;
         if (wrapperDisplay === 'grid') {
-            columnsWrapper.style.setProperty('grid-template-columns', '275px minmax(0, 1fr) 245px', 'important');
+            columnsWrapper.style.setProperty('grid-template-columns', '310px minmax(0, 1fr) 210px', 'important');
         } else {
             columnsWrapper.style.setProperty('display', 'flex', 'important');
             columnsWrapper.style.setProperty('align-items', 'stretch', 'important');
@@ -303,10 +332,10 @@ function arrangeActivityMenuLayout() {
 
         if (col1) {
             col1.style.setProperty('box-sizing', 'border-box', 'important');
-            col1.style.setProperty('flex', '0 0 275px', 'important');
-            col1.style.setProperty('width', '275px', 'important');
-            col1.style.setProperty('min-width', '275px', 'important');
-            col1.style.setProperty('max-width', '275px', 'important');
+            col1.style.setProperty('flex', '0 0 310px', 'important');
+            col1.style.setProperty('width', '310px', 'important');
+            col1.style.setProperty('min-width', '310px', 'important');
+            col1.style.setProperty('max-width', '310px', 'important');
         }
         if (col2) {
             col2.style.setProperty('box-sizing', 'border-box', 'important');
@@ -316,15 +345,30 @@ function arrangeActivityMenuLayout() {
         }
         if (col3) {
             col3.style.setProperty('box-sizing', 'border-box', 'important');
-            col3.style.setProperty('flex', '0 0 245px', 'important');
-            col3.style.setProperty('width', '245px', 'important');
-            col3.style.setProperty('min-width', '230px', 'important');
-            col3.style.setProperty('max-width', '250px', 'important');
+            col3.style.setProperty('flex', '0 0 210px', 'important');
+            col3.style.setProperty('width', '210px', 'important');
+            col3.style.setProperty('min-width', '205px', 'important');
+            col3.style.setProperty('max-width', '215px', 'important');
             col3.style.setProperty('overflow-x', 'hidden', 'important');
 
-            col3.querySelectorAll('button, select, input').forEach(el => {
+            col3.querySelectorAll('select, input').forEach(el => {
                 el.style.setProperty('max-width', '100%', 'important');
                 el.style.setProperty('box-sizing', 'border-box', 'important');
+            });
+
+            col3.querySelectorAll('button').forEach(btn => {
+                btn.style.setProperty('width', '100%', 'important');
+                btn.style.setProperty('max-width', '100%', 'important');
+                btn.style.setProperty('box-sizing', 'border-box', 'important');
+                btn.style.setProperty('height', 'auto', 'important');
+                btn.style.setProperty('min-height', '44px', 'important');
+                btn.style.setProperty('padding', '10px 10px', 'important');
+                btn.style.setProperty('line-height', '1.35', 'important');
+                btn.style.setProperty('white-space', 'normal', 'important');
+                btn.style.setProperty('display', 'flex', 'important');
+                btn.style.setProperty('align-items', 'center', 'important');
+                btn.style.setProperty('justify-content', 'center', 'important');
+                btn.style.setProperty('text-align', 'center', 'important');
             });
         }
 
@@ -393,9 +437,7 @@ function arrangeActivityMenuLayout() {
                         countPill.appendChild(sentenceCountSelect);
                         controlsRight.appendChild(countPill);
 
-                        if (oldWrapper && oldWrapper !== col3 && oldWrapper.children.length === 0) {
-                            oldWrapper.remove();
-                        }
+                        pruneEmptyAncestorBoxes(oldWrapper, col3 || columnsWrapper);
                     }
 
                     const estBadge = document.createElement('span');
@@ -407,7 +449,7 @@ function arrangeActivityMenuLayout() {
             }
         }
 
-        // Remove any leftover "Exercise Sentence Count:" label/wrapper from Column 3
+        // Remove any leftover "Exercise Sentence Count:" label/wrapper or empty white box from Column 3
         removeStraySentenceCountFromCol3(col3);
     }
 }
