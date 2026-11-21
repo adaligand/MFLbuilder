@@ -32,7 +32,7 @@ function getActivityInstruction(type, lang) {
         'gap-t': `Fill in the missing ${lang} word.`,
         'vowels': 'Fill in the missing vowels.',
         'cons': 'Fill in the missing consonants.',
-        'faulty': 'Type the corrected English sentence.',
+        'faulty': 'Click on the wrong word in the English translation.',
         'trans-en': `Translate the ${lang} sentence into English.`,
         'trans-target': `Translate the English sentence into ${lang}.`,
         'listen-trad': 'Listen to the audio and fill in the missing English word.',
@@ -148,7 +148,7 @@ async function loadStudentTask(assignmentId) {
                             if (!r || !r.studentAnswer) return false;
                             const ans = r.studentAnswer.trim();
                             if (ans === '' || ans === '(Empty)' || ans.startsWith('(Incomplete') || ans === '(Unmatched)') return false;
-                            if ((act === 'nospaces' || act === 'jumbled') && !r.isDone) return false;
+                            if ((act === 'nospaces' || act === 'jumbled' || act === 'faulty') && !r.isDone) return false;
                             if ((act === 'vowels' || act === 'cons') && (!Array.isArray(r.letterValues) || r.letterValues.length === 0 || r.letterValues.some(v => !v.trim()))) return false;
                             return true;
                         });
@@ -362,7 +362,7 @@ function isCurrentExerciseCompleted() {
         if (ans === '' || ans === '(Empty)' || ans.startsWith('(Incomplete') || ans === '(Unmatched)') {
             return false;
         }
-        if ((actType === 'nospaces' || actType === 'jumbled') && !resp.isDone) {
+        if ((actType === 'nospaces' || actType === 'jumbled' || actType === 'faulty') && !resp.isDone) {
             return false;
         }
         if ((actType === 'vowels' || actType === 'cons') &&
@@ -503,6 +503,9 @@ function checkOneByOneItemCompletion() {
     if (actType === 'jumbled') {
         const bank = area.querySelector('.jumble-word-bank');
         isItemComplete = bank && bank.children.length === 0;
+    } else if (actType === 'faulty') {
+        const block = area.querySelector('.student-item-block');
+        isItemComplete = !!(block && block.dataset.faultySolved === 'true');
     } else if (actType === 'nospaces') {
         const block = area.querySelector('.student-item-block');
         if (block) {
@@ -570,6 +573,62 @@ function makeStudentGapHTML(text, itemIdx, actType, savedVal = '') {
 // Helper to update One-by-One submit button visibility based on input text
 function updateOneByOneSubmitVisibility() {
     checkOneByOneItemCompletion();
+}
+
+/* =========================================================
+   FAULTY TRANSLATION WORD-DIFF HELPER
+   ========================================================= */
+function getFaultyWordDiff(faultyText, correctText) {
+    const faultyTokens = (faultyText || '').trim().split(/\s+/).filter(Boolean);
+    const correctTokens = (correctText || '').trim().split(/\s+/).filter(Boolean);
+    const norm = (w) => w.toLowerCase().replace(/^[.,!?;:'"«»()]+|[.,!?;:'"«»()]+$/g, '');
+
+    const fNorm = faultyTokens.map(norm);
+    const cNorm = correctTokens.map(norm);
+    const m = fNorm.length;
+    const n = cNorm.length;
+
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = m - 1; i >= 0; i--) {
+        for (let j = n - 1; j >= 0; j--) {
+            dp[i][j] = (fNorm[i] === cNorm[j])
+                ? 1 + dp[i + 1][j + 1]
+                : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+    }
+
+    const matchedFaulty = new Set();
+    const matchedCorrect = new Set();
+    let i = 0, j = 0;
+    while (i < m && j < n) {
+        if (fNorm[i] === cNorm[j]) {
+            matchedFaulty.add(i);
+            matchedCorrect.add(j);
+            i++;
+            j++;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+            i++;
+        } else {
+            j++;
+        }
+    }
+
+    const wrongIndices = [];
+    for (let k = 0; k < m; k++) {
+        if (!matchedFaulty.has(k)) wrongIndices.push(k);
+    }
+
+    const correctedIndices = [];
+    for (let k = 0; k < n; k++) {
+        if (!matchedCorrect.has(k)) correctedIndices.push(k);
+    }
+
+    if (wrongIndices.length === 0 && faultyTokens.length > 0) {
+        const diffIdx = faultyTokens.findIndex((tok, idx) => tok !== correctTokens[idx]);
+        wrongIndices.push(diffIdx >= 0 ? diffIdx : 0);
+    }
+
+    return { faultyTokens, correctTokens, wrongIndices, correctedIndices };
 }
 
 function renderCurrentStudentExercise() {
@@ -815,15 +874,55 @@ function renderCurrentStudentExercise() {
                 </div>
             `;
         }
-        else { // faulty, trans-en, trans-target
+        else if (actType === 'faulty') {
+            const faultyText = currentSent.faultyTr || getOrGenerateFaultyTr(currentSent);
+            const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
+            const isAlreadySolved = !!(savedResp && savedResp.isDone);
+            const { faultyTokens, correctTokens, wrongIndices, correctedIndices } = getFaultyWordDiff(faultyText, englishText);
+
+            const faultyTilesHTML = faultyTokens.map((w, idx) => {
+                const isWrongWord = wrongIndices.includes(idx);
+                const solvedStyle = (isAlreadySolved && isWrongWord)
+                    ? 'background:#fee2e2; border-color:#ef4444; color:#b91c1c; text-decoration:line-through;'
+                    : '';
+                return `<span class="interactive-tile jumble-word-tile faulty-word-tile" data-word-idx="${idx}" style="${solvedStyle}">${w}</span>`;
+            }).join('');
+
+            const correctTilesHTML = correctTokens.map((w, idx) => {
+                const isCorrectedWord = correctedIndices.includes(idx);
+                const highlightStyle = isCorrectedWord
+                    ? 'background:#dcfce7; border-color:#10b981; color:#065f46; font-weight:700;'
+                    : 'background:#f8fafc; border-color:#cbd5e1; color:#0f172a;';
+                return `<span class="interactive-tile jumble-word-tile faulty-correct-tile" style="cursor:default; ${highlightStyle}">${w}</span>`;
+            }).join('');
+
+            cardContentHTML = `
+                <div class="student-item-block"
+                    data-idx="${studentSubItemIndex}"
+                    data-faulty-solved="${isAlreadySolved ? 'true' : 'false'}"
+                    data-wrong-attempts="${savedResp?.mistakes || 0}"
+                    data-clicked-word="${(savedResp?.clickedWord || '').replace(/"/g, '&quot;')}"
+                    data-clicked-idx="${savedResp?.clickedIdx !== undefined ? savedResp.clickedIdx : -1}"
+                    data-wrong-indices="${wrongIndices.join(',')}"
+                    style="text-align:center; padding:10px 0;">
+                    <p style="margin:0 0 18px 0; font-weight:bold; color:#0f172a; font-size:24px;">${targetText}</p>
+                    <div class="faulty-word-bank" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:center; align-items:center; margin-bottom:14px;">
+                        ${faultyTilesHTML}
+                    </div>
+                    <div id="faulty-feedback" style="min-height:22px; font-weight:bold; font-size:14px; margin-bottom:10px; color:${isAlreadySolved ? '#10b981' : '#64748b'};">
+                        ${isAlreadySolved ? '✅ Wrong word spotted! Correct translation:' : ''}
+                    </div>
+                    <div id="faulty-corrected-container" style="display:${isAlreadySolved ? 'flex' : 'none'}; flex-wrap:wrap; gap:8px; justify-content:center; align-items:center; padding-top:8px;">
+                        ${correctTilesHTML}
+                    </div>
+                </div>
+            `;
+        }
+        else { // trans-en, trans-target
             let promptText = '';
             let answerRef = '';
 
-            if (actType === 'faulty') {
-                const faultyText = currentSent.faultyTr || getOrGenerateFaultyTr(currentSent);
-                promptText = `<span style="font-size:24px; font-weight:bold; color:#0f172a;">${targetText}</span><br><span style="color:#b91c1c; font-weight:600; font-size:16px;">Faulty English: "${faultyText}"</span>`;
-                answerRef = englishText;
-            } else if (actType === 'trans-en') {
+            if (actType === 'trans-en') {
                 promptText = `<span style="font-size:24px; font-weight:bold; color:#0f172a;">${targetText}</span>`;
                 answerRef = englishText;
             } else if (actType === 'trans-target') {
@@ -910,6 +1009,63 @@ function renderCurrentStudentExercise() {
                         }
                         saveStudentCurrentExerciseResponses();
                         checkOneByOneItemCompletion();
+                    };
+                });
+            }
+        }
+        else if (actType === 'faulty') {
+            const block = area.querySelector('.student-item-block');
+            if (block) {
+                const wrongIndices = (block.dataset.wrongIndices || '')
+                    .split(',')
+                    .filter(s => s !== '')
+                    .map(Number);
+
+                area.querySelectorAll('.faulty-word-tile').forEach(tile => {
+                    tile.onclick = function() {
+                        if (block.dataset.faultySolved === 'true') return;
+
+                        const wordIdx = parseInt(this.dataset.wordIdx, 10);
+                        const feedbackEl = document.getElementById('faulty-feedback');
+
+                        if (wrongIndices.includes(wordIdx)) {
+                            block.dataset.faultySolved = 'true';
+                            block.dataset.clickedWord = this.innerText.trim();
+                            block.dataset.clickedIdx = String(wordIdx);
+
+                            // Highlight the wrong word(s) in the top row
+                            area.querySelectorAll('.faulty-word-tile').forEach(t => {
+                                const idx = parseInt(t.dataset.wordIdx, 10);
+                                if (wrongIndices.includes(idx)) {
+                                    t.style.background = '#fee2e2';
+                                    t.style.borderColor = '#ef4444';
+                                    t.style.color = '#b91c1c';
+                                    t.style.textDecoration = 'line-through';
+                                }
+                            });
+
+                            if (feedbackEl) {
+                                feedbackEl.style.color = '#10b981';
+                                feedbackEl.innerText = '✅ Wrong word spotted! Correct translation:';
+                            }
+
+                            const correctedBox = document.getElementById('faulty-corrected-container');
+                            if (correctedBox) correctedBox.style.display = 'flex';
+
+                            saveStudentCurrentExerciseResponses();
+                            checkOneByOneItemCompletion();
+                        } else {
+                            block.dataset.wrongAttempts = parseInt(block.dataset.wrongAttempts || '0', 10) + 1;
+                            this.classList.add('wrong-match');
+                            if (feedbackEl) {
+                                feedbackEl.style.color = '#ef4444';
+                                feedbackEl.innerText = '❌ That word is correct — click on the wrong word!';
+                            }
+                            setTimeout(() => {
+                                this.classList.remove('wrong-match');
+                            }, 700);
+                            saveStudentCurrentExerciseResponses();
+                        }
                     };
                 });
             }
@@ -1553,22 +1709,33 @@ function saveStudentCurrentExerciseResponses() {
             };
         }
     } 
-    // --- FAULTY SENTENCE CORRECTION ---
+    // --- FAULTY SENTENCE CORRECTION (CLICK WRONG WORD) ---
     else if (actType === 'faulty') {
+        const block = area.querySelector('.student-item-block');
         const s = sents[studentSubItemIndex];
-        if (s) {
-            const input = area.querySelector('.full-typing-input');
-            const ans = input ? input.value.trim() : '';
+        if (block && s) {
+            const isDone = (block.dataset.faultySolved === 'true');
+            const wrongAttempts = parseInt(block.dataset.wrongAttempts || '0', 10);
+            const clickedWord = block.dataset.clickedWord || '';
+            const clickedIdx = parseInt(block.dataset.clickedIdx || '-1', 10);
+            const faultyShown = s.faultyTr || getOrGenerateFaultyTr(s);
             const correct = (s.tr || '').trim();
 
-            const evalResult = evaluateTextSimilarity(ans, correct);
+            let points = 0;
+            if (isDone) {
+                points = (wrongAttempts === 0) ? 1.0 : 0.5;
+            }
 
             responses[studentSubItemIndex] = {
-                prompt: `Correct English for: "${s.t}" (Faulty was: "${s.faultyTr || getOrGenerateFaultyTr(s)}")`,
-                studentAnswer: ans || '(Empty)',
+                prompt: `${s.t} — Faulty: "${faultyShown}"`,
+                studentAnswer: isDone ? `Clicked "${clickedWord}" → ${correct}` : '(Empty)',
                 correctAnswer: correct || '(No markscheme translation set)',
-                isCorrect: evalResult.points === 1,
-                points: evalResult.points
+                isCorrect: points === 1.0,
+                points: points,
+                mistakes: wrongAttempts,
+                isDone: isDone,
+                clickedWord: clickedWord,
+                clickedIdx: clickedIdx
             };
         }
     } 
