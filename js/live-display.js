@@ -7,6 +7,7 @@ let classDisplaySentences = []; // Holds the randomized sentence list
 // Live games timer reference & sentence processing helpers
 let cdTimer = null;
 let currentCDGapText = null;
+let currentCDTargetText = '';
 let cdGridTimerInterval = null;
 let cdGridRemainingSeconds = 300;
 let cdGridIsRunning = false;
@@ -188,12 +189,101 @@ function toggleGridCountdownTimer() {
     }, 1000);
 }
 
-function removeWordsFromSentence(text) {
+/* =========================================================
+   DELAYED COPYING WORD-REMOVAL DROPDOWN CONTROLS
+   ========================================================= */
+function ensureCDDelayedCopyingControls() {
+    const gameSelect = document.getElementById('class-display-game-select');
+    if (!gameSelect || !gameSelect.parentElement) return;
+
+    if (!document.getElementById('cd-delayed-copying-gap-wrap')) {
+        const wrap = document.createElement('span');
+        wrap.id = 'cd-delayed-copying-gap-wrap';
+        wrap.style.cssText = 'display:none; align-items:center; gap:6px; margin-left:10px;';
+        wrap.innerHTML = `
+            <label for="cd-delayed-copying-gap-select" style="font-size:13px; font-weight:600; color:#475569; white-space:nowrap;">Remove:</label>
+            <select id="cd-delayed-copying-gap-select"
+                    onchange="handleCDDelayedCopyingGapChange()"
+                    title="Choose how many words are removed in Delayed Copying"
+                    style="padding:6px 10px; border-radius:8px; border:1.5px solid #cbd5e1; font-size:14px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                <option value="1" selected>1 word</option>
+                <option value="25">25% of words</option>
+                <option value="50">50% of words</option>
+                <option value="75">75% of words</option>
+                <option value="100">100% of words</option>
+            </select>
+        `;
+        gameSelect.insertAdjacentElement('afterend', wrap);
+    }
+}
+
+function getCDDelayedCopyingGapLevel() {
+    const sel = document.getElementById('cd-delayed-copying-gap-select');
+    const raw = sel ? sel.value : '1';
+    const cleaned = String(raw).replace('%', '').trim();
+    return ['1', '25', '50', '75', '100'].includes(cleaned) ? cleaned : '1';
+}
+
+function handleCDDelayedCopyingGapChange() {
+    const mode = document.getElementById('class-display-game-select')?.value;
+    if (mode !== 'delayed-copying' || !currentCDTargetText) return;
+
+    const gapLevel = getCDDelayedCopyingGapLevel();
+    currentCDGapText = removeWordsFromSentence(currentCDTargetText, gapLevel);
+
+    // If the countdown has finished and the gapped sentence is already displayed, update it live
+    const textEl = document.getElementById('cd-copy-text');
+    if (textEl && !cdTimer) {
+        textEl.innerHTML = currentCDGapText;
+    }
+}
+
+function removeWordsFromSentence(text, gapLevel = '1') {
     if (!text) return '';
 
     const words = text.split(' ');
+    const blankDisp = isAnswerRevealed ? 'none' : 'inline';
+    const ansDisp = isAnswerRevealed ? 'inline' : 'none';
+    const normalizedLevel = ['1', '25', '50', '75', '100'].includes(String(gapLevel))
+        ? String(gapLevel)
+        : '1';
 
-    // Find indices of words with at least 3 letters (ignoring punctuation)
+    // Multi-word / percentage removal (25%, 50%, 75%, 100%)
+    if (normalizedLevel !== '1') {
+        const wordEntries = words
+            .map((word, index) => {
+                const cleanWord = word.replace(/[^\p{L}\p{N}]/gu, '');
+                return cleanWord.length > 0 ? { index, cleanLen: cleanWord.length } : null;
+            })
+            .filter(Boolean);
+
+        if (wordEntries.length === 0) return text;
+
+        const pct = parseInt(normalizedLevel, 10);
+        const removeCount = (pct >= 100)
+            ? wordEntries.length
+            : Math.max(1, Math.round(wordEntries.length * (pct / 100)));
+
+        // Prioritize words with >= 2 characters first, then 1-character words if needed
+        const longerPool = shuffleArray(wordEntries.filter(e => e.cleanLen >= 2));
+        const shorterPool = shuffleArray(wordEntries.filter(e => e.cleanLen < 2));
+        const selectedSet = new Set(
+            [...longerPool, ...shorterPool]
+                .slice(0, removeCount)
+                .map(e => e.index)
+        );
+
+        return words.map((word, index) => {
+            if (!selectedSet.has(index)) return word;
+            const leadingPunct = word.match(/^[^\p{L}\p{N}]+/u)?.[0] || '';
+            const trailingPunct = word.match(/[^\p{L}\p{N}]+$/u)?.[0] || '';
+            const coreWord = word.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '');
+            const blankBars = '_'.repeat(Math.max(3, Math.min(7, coreWord.length)));
+            return `${leadingPunct}<span class="cd-gap-blank" style="display:${blankDisp};">${blankBars}</span><span class="cd-gap-ans" style="display:${ansDisp}; color:#16a34a; font-weight:bold;">${coreWord}</span>${trailingPunct}`;
+        }).join(' ');
+    }
+
+    // Default: Find indices of words with at least 3 letters (ignoring punctuation)
     const eligibleIndices = words
         .map((word, index) => {
             const cleanWord = word.replace(/[^\p{L}\p{N}]/gu, '');
@@ -210,9 +300,6 @@ function removeWordsFromSentence(text) {
 
     // Randomly pick exactly ONE word index from eligible pool
     const selectedIndex = targetPool[Math.floor(Math.random() * targetPool.length)];
-
-    const blankDisp = isAnswerRevealed ? 'none' : 'inline';
-    const ansDisp = isAnswerRevealed ? 'inline' : 'none';
 
     // Replace selected word with span elements compatible with reveal toggle
     return words.map((word, index) => {
@@ -231,10 +318,16 @@ function openInteractiveClassDisplay() {
     const modal = document.getElementById('class-display-modal');
     document.body.style.overflow = 'hidden';
 
+    ensureCDDelayedCopyingControls();
+
     // Reset dropdown selection back to the top activity on re-open
     const gameSelect = document.getElementById('class-display-game-select');
     if (gameSelect) {
         gameSelect.selectedIndex = 0;
+    }
+    const gapSelect = document.getElementById('cd-delayed-copying-gap-select');
+    if (gapSelect) {
+        gapSelect.value = '1';
     }
 
     modal.style.display = 'flex';
@@ -257,6 +350,7 @@ function openInteractiveClassDisplay() {
 
 function handleClassDisplayActivityChange() {
     clearCDTimer();
+    currentCDGapText = null;
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     isAnswerRevealed = false;
 
@@ -333,9 +427,16 @@ function handleCDReattempt(targetText) {
 }
 
 function playClassDisplayGame() {
-   clearCDTimer();
+    clearCDTimer();
+    ensureCDDelayedCopyingControls();
+
     const mode = document.getElementById('class-display-game-select').value;
     const gridTimerBar = document.getElementById('cd-grid-timer-bar');
+    const dcGapWrap = document.getElementById('cd-delayed-copying-gap-wrap');
+
+    if (dcGapWrap) {
+        dcGapWrap.style.display = (mode === 'delayed-copying') ? 'inline-flex' : 'none';
+    }
 
     if (mode !== 'sentence-grid') {
         restoreDefaultGridTimer();
@@ -366,6 +467,7 @@ function playClassDisplayGame() {
     const targetText = item.t || item.target || '';
     const englishText = cleanEnglishText(item.tr || item.en || item.english || '');
     const safeTarget = targetText.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    currentCDTargetText = targetText;
 
     let questionHTML = '';
     let answerHTML = '';
@@ -497,9 +599,10 @@ function startDelayedDictation(targetText, isReattempt = false) {
     });
 }
 
-// Handler for Delayed Copying: 7s display -> 3s memory countdown -> 1 word removed
+// Handler for Delayed Copying: 7s display -> 3s memory countdown -> selected word count/percentage removed
 function startDelayedCopyingSequence(targetText, isReattempt = false) {
     clearCDTimer();
+    currentCDTargetText = targetText;
 
     const badge = document.getElementById('cd-copy-timer-badge');
     const textEl = document.getElementById('cd-copy-text');
@@ -507,7 +610,7 @@ function startDelayedCopyingSequence(targetText, isReattempt = false) {
 
     // Generate gap text only on the first attempt
     if (!isReattempt || !currentCDGapText) {
-        currentCDGapText = removeWordsFromSentence(targetText);
+        currentCDGapText = removeWordsFromSentence(targetText, getCDDelayedCopyingGapLevel());
     }
 
     if (reattemptBtn) reattemptBtn.style.display = 'none';
@@ -581,7 +684,7 @@ function toggleClassDisplayAnswer(btn) {
 
 function nextClassDisplaySentence() {
     clearCDTimer();
-    currentCDGapText = null; // Reset cached word for next sentence
+    currentCDGapText = null; // Reset cached word(s) for next sentence
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     if (!classDisplaySentences || classDisplaySentences.length === 0) {
         classDisplaySentences = shuffleArray(getAssembledSentences());
@@ -725,6 +828,7 @@ function playClassDisplayMatchUp(allSentences) {
         this.innerHTML = isAnswerRevealed ? '🙈 Hide' : '🔍 Reveal';
     };
 }
+
 function playClassDisplayGrid(allSentences) {
     const NUM_CELLS = 12;
     if (allSentences.length < NUM_CELLS) {
