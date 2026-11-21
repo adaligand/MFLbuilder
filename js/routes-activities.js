@@ -1,7 +1,9 @@
 /* =========================
    PREVIEW & OPTIONS MENU
 ========================= */
-function getDelayedCopyingGapOptionsHTML(selectedLevel = '1') {
+const MULTI_GAP_ACTIVITY_IDS = ['listen-dictation', 'delayed-dictation', 'delayed-copying'];
+
+function getActivityGapOptionsHTML(selectedLevel = '1') {
     const normalized = ['1', '25', '50', '75', '100'].includes(String(selectedLevel))
         ? String(selectedLevel)
         : '1';
@@ -17,28 +19,52 @@ function getDelayedCopyingGapOptionsHTML(selectedLevel = '1') {
         .join('');
 }
 
-function onDelayedCopyingGapLevelChange(selectEl) {
-    const chk = document.getElementById('chk-delayed-copying');
+function getDelayedCopyingGapOptionsHTML(selectedLevel = '1') {
+    return getActivityGapOptionsHTML(selectedLevel);
+}
+
+function onActivityGapLevelChange(actId, selectEl) {
+    const chk = document.getElementById(`chk-${actId}`);
     if (chk && !chk.checked) {
         chk.checked = true;
         renderPerActivitySentenceBoxes();
         return;
     }
-    const badge = document.getElementById('dc-card-gap-badge');
-    if (badge && selectEl) {
-        const label = selectEl.options[selectEl.selectedIndex]?.text || '1 word';
+    const label = selectEl?.options[selectEl.selectedIndex]?.text || '1 word';
+    const badge = document.getElementById(`${actId}-card-gap-badge`);
+    if (badge) {
         badge.innerText = `(${label} removed)`;
+    }
+    if (actId === 'delayed-copying') {
+        const legacyBadge = document.getElementById('dc-card-gap-badge');
+        if (legacyBadge) {
+            legacyBadge.innerText = `(${label} removed)`;
+        }
     }
 }
 
-function buildActivitySelectorRowHTML(a, selectedDcGapLevel = '1', extraRowStyle = 'padding: 6px 8px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 8px;') {
-    const dropdownHTML = (a.id === 'delayed-copying')
-        ? `<select id="delayed-copying-gap-select"
+function onDelayedCopyingGapLevelChange(selectEl) {
+    onActivityGapLevelChange('delayed-copying', selectEl);
+}
+
+function resolveActivityGapLevelFromArg(actId, gapLevelsOrSingle = '1') {
+    if (gapLevelsOrSingle && typeof gapLevelsOrSingle === 'object') {
+        return String(gapLevelsOrSingle[actId] || '1');
+    }
+    return actId === 'delayed-copying' ? String(gapLevelsOrSingle || '1') : '1';
+}
+
+function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle = 'padding: 6px 8px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 8px;') {
+    const isMultiGap = MULTI_GAP_ACTIVITY_IDS.includes(a.id);
+    const selectedLevel = resolveActivityGapLevelFromArg(a.id, gapLevelsOrSingle);
+
+    const dropdownHTML = isMultiGap
+        ? `<select id="${a.id}-gap-select"
                 onclick="event.stopPropagation()"
-                onchange="event.stopPropagation(); onDelayedCopyingGapLevelChange(this)"
-                title="Choose how many words are removed in Delayed Copying"
+                onchange="event.stopPropagation(); onActivityGapLevelChange('${a.id}', this)"
+                title="Choose how many words are removed in ${a.label}"
                 style="margin-left:auto; padding:3px 8px; border-radius:6px; border:1px solid #cbd5e1; font-size:12px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
-                ${getDelayedCopyingGapOptionsHTML(selectedDcGapLevel)}
+                ${getActivityGapOptionsHTML(selectedLevel)}
            </select>`
         : '';
 
@@ -152,8 +178,14 @@ function openActivityMenu() {
         {id:'delayed-copying', label:'Delayed Copying'}
     ];
 
+    const defaultGapLevels = {
+        'listen-dictation': '1',
+        'delayed-dictation': '1',
+        'delayed-copying': '1'
+    };
+
     document.getElementById('activity-list').innerHTML = list
-        .map(a => buildActivitySelectorRowHTML(a, '1'))
+        .map(a => buildActivitySelectorRowHTML(a, defaultGapLevels))
         .join('');
     
     renderPerActivitySentenceBoxes();
@@ -1081,11 +1113,12 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
             return;
         }
 
-        let dcGapBadgeHTML = '';
-        if (actId === 'delayed-copying') {
-            const dcSelect = document.getElementById('delayed-copying-gap-select');
-            const dcLabel = dcSelect ? (dcSelect.options[dcSelect.selectedIndex]?.text || '1 word') : '1 word';
-            dcGapBadgeHTML = `<span id="dc-card-gap-badge" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${dcLabel} removed)</span>`;
+        let gapBadgeHTML = '';
+        if (MULTI_GAP_ACTIVITY_IDS.includes(actId)) {
+            const gapSelect = document.getElementById(`${actId}-gap-select`);
+            const gapLabel = gapSelect ? (gapSelect.options[gapSelect.selectedIndex]?.text || '1 word') : '1 word';
+            const badgeId = actId === 'delayed-copying' ? 'dc-card-gap-badge' : `${actId}-card-gap-badge`;
+            gapBadgeHTML = `<span id="${badgeId}" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${gapLabel} removed)</span>`;
         }
 
         html += `
@@ -1093,7 +1126,7 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
                 <div class="act-card-header" onclick="toggleActivityCollapse('${actId}')">
                     <span style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                         ✏️ ${actLabel} (${actSents.length} Sentences)
-                        ${dcGapBadgeHTML}
+                        ${gapBadgeHTML}
                         <button type="button" 
                             style="padding: 2px 8px; font-size: 12px; margin: 0; background: white; border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; font-weight:600; color:#334155;" 
                             onclick="refreshActivitySentences('${actId}', event)" 
@@ -1545,9 +1578,21 @@ async function publishTaskToClassroom() {
     const selectedActivities = Array.from(document.querySelectorAll('#activity-list input:checked')).map(c => c.value);
     if (selectedActivities.length === 0) return alert("Select at least one activity!");
 
+    const listenDictationGapLevel = selectedActivities.includes('listen-dictation')
+        ? (document.getElementById('listen-dictation-gap-select')?.value || '1')
+        : '1';
+    const delayedDictationGapLevel = selectedActivities.includes('delayed-dictation')
+        ? (document.getElementById('delayed-dictation-gap-select')?.value || '1')
+        : '1';
     const delayedCopyingGapLevel = selectedActivities.includes('delayed-copying')
         ? (document.getElementById('delayed-copying-gap-select')?.value || '1')
         : '1';
+
+    const activityGapLevels = {
+        'listen-dictation': listenDictationGapLevel,
+        'delayed-dictation': delayedDictationGapLevel,
+        'delayed-copying': delayedCopyingGapLevel
+    };
 
     const tableLimit = parseInt(document.getElementById('table-sentence-count').value, 10);
     const allSentences = getAssembledSentences();
@@ -1643,7 +1688,10 @@ async function publishTaskToClassroom() {
                 builderId: targetBuilderId,
                 builderSnapshot: builderSnapshot,
                 selectedActivities: selectedActivities,
+                listenDictationGapLevel: listenDictationGapLevel,
+                delayedDictationGapLevel: delayedDictationGapLevel,
                 delayedCopyingGapLevel: delayedCopyingGapLevel,
+                activityGapLevels: activityGapLevels,
                 sentencesPerActivity: structuredSentencesPerActivity,
                 maxPoints: maxPoints > 0 ? maxPoints : 10,
                 dueDate: dueDateVal ? new Date(dueDateVal).toISOString() : null,
@@ -1737,7 +1785,10 @@ async function publishTaskToClassroom() {
         title: title,
         lang: window.duplicatingAssignmentLang || document.getElementById('meta-lang').value || meta.lang || "French",
         selectedActivities: selectedActivities,
+        listenDictationGapLevel: listenDictationGapLevel,
+        delayedDictationGapLevel: delayedDictationGapLevel,
         delayedCopyingGapLevel: delayedCopyingGapLevel,
+        activityGapLevels: activityGapLevels,
         sentencesPerActivity: structuredSentencesPerActivity,
         maxPoints: maxPoints > 0 ? maxPoints : 10,
         dueDate: dueDateVal ? new Date(dueDateVal).toISOString() : null,
