@@ -1,6 +1,8 @@
 /* =========================
    STUDENT PORTAL & MARKSHEET REVIEW
 ========================= */
+const STUDENT_MULTI_GAP_ACTIVITIES = ['listen-dictation', 'delayed-dictation', 'delayed-copying'];
+
 function getCleanActivityTitle(type, lang) {
     const map = {
         'study': 'Sentence Table (Reference)',
@@ -22,16 +24,41 @@ function getCleanActivityTitle(type, lang) {
     return map[type] || type;
 }
 
-function getDelayedCopyingGapLevel() {
-    const raw = currentStudentAssignment?.delayedCopyingGapLevel
-        ?? currentStudentAssignment?.activitySettings?.['delayed-copying']?.gapLevel
+function getActivityGapLevel(actType) {
+    const fieldMap = {
+        'listen-dictation': 'listenDictationGapLevel',
+        'delayed-dictation': 'delayedDictationGapLevel',
+        'delayed-copying': 'delayedCopyingGapLevel'
+    };
+    const fieldName = fieldMap[actType];
+    const raw = (fieldName ? currentStudentAssignment?.[fieldName] : null)
+        ?? currentStudentAssignment?.activityGapLevels?.[actType]
+        ?? currentStudentAssignment?.activitySettings?.[actType]?.gapLevel
         ?? '1';
     const cleaned = String(raw).replace('%', '').trim();
     return ['1', '25', '50', '75', '100'].includes(cleaned) ? cleaned : '1';
 }
 
+function getDelayedCopyingGapLevel() {
+    return getActivityGapLevel('delayed-copying');
+}
+
 function getActivityInstruction(type, lang) {
-    const dcLevel = getDelayedCopyingGapLevel();
+    const ldLevel = getActivityGapLevel('listen-dictation');
+    const ldInstruction = ldLevel === '1'
+        ? `Listen to the audio and fill in the missing ${lang} word.`
+        : (ldLevel === '100'
+            ? `Listen to the audio and type all the missing ${lang} words.`
+            : `Listen to the audio and fill in the missing ${lang} words.`);
+
+    const ddLevel = getActivityGapLevel('delayed-dictation');
+    const ddInstruction = ddLevel === '1'
+        ? `Listen to the audio, memorise it and fill in the missing ${lang} word.`
+        : (ddLevel === '100'
+            ? `Listen to the audio, memorise it and type all the missing ${lang} words.`
+            : `Listen to the audio, memorise it and fill in the missing ${lang} words.`);
+
+    const dcLevel = getActivityGapLevel('delayed-copying');
     const dcInstruction = dcLevel === '1'
         ? `Memorise the ${lang} sentence before it disappears, then fill in the missing word.`
         : (dcLevel === '100'
@@ -51,8 +78,8 @@ function getActivityInstruction(type, lang) {
         'trans-en': `Translate the ${lang} sentence into English.`,
         'trans-target': `Translate the English sentence into ${lang}.`,
         'listen-trad': 'Listen to the audio and fill in the missing English word.',
-        'listen-dictation': `Listen to the audio and fill in the missing ${lang} word.`,
-        'delayed-dictation': `Listen to the audio, memorise it and fill in the missing ${lang} word.`,
+        'listen-dictation': ldInstruction,
+        'delayed-dictation': ddInstruction,
         'delayed-copying': dcInstruction
     };
     return map[type] || 'Complete the exercise below.';
@@ -165,7 +192,7 @@ async function loadStudentTask(assignmentId) {
                             if (ans === '' || ans === '(Empty)' || ans.startsWith('(Incomplete') || ans === '(Unmatched)') return false;
                             if ((act === 'nospaces' || act === 'jumbled' || act === 'faulty') && !r.isDone) return false;
                             if ((act === 'vowels' || act === 'cons') && (!Array.isArray(r.letterValues) || r.letterValues.length === 0 || r.letterValues.some(v => !v.trim()))) return false;
-                            if (act === 'delayed-copying' && Array.isArray(r.gapValues) && r.gapValues.length > 0 && r.gapValues.some(v => !v || !v.trim())) return false;
+                            if (STUDENT_MULTI_GAP_ACTIVITIES.includes(act) && Array.isArray(r.gapValues) && r.gapValues.length > 0 && r.gapValues.some(v => !v || !v.trim())) return false;
                             return true;
                         });
 
@@ -385,7 +412,7 @@ function isCurrentExerciseCompleted() {
             (!Array.isArray(resp.letterValues) || resp.letterValues.length === 0 || resp.letterValues.some(v => !v.trim()))) {
             return false;
         }
-        if (actType === 'delayed-copying' &&
+        if (STUDENT_MULTI_GAP_ACTIVITIES.includes(actType) &&
             Array.isArray(resp.gapValues) && resp.gapValues.length > 0 && resp.gapValues.some(v => !v || !v.trim())) {
             return false;
         }
@@ -547,7 +574,7 @@ function checkOneByOneItemCompletion() {
 }
 
 /* =========================================================
-   DETERMINISTIC SEEDED WORD PICKER FOR MULTI-GAP DELAYED COPYING
+   DETERMINISTIC SEEDED WORD PICKER FOR MULTI-GAP ACTIVITIES
    ========================================================= */
 function selectSeededGapIndices(eligibleEntries, count, seedKey) {
     if (count >= eligibleEntries.length) {
@@ -588,9 +615,9 @@ function selectSeededGapIndices(eligibleEntries, count, seedKey) {
 function makeStudentGapHTML(text, itemIdx, actType, savedVal = '', savedGapValues = null) {
     if (!text) return { html: '', cleanGap: '', cleanGaps: [] };
 
-    // Handle multi-word / percentage removal for Delayed Copying (25%, 50%, 75%, 100%)
-    if (actType === 'delayed-copying') {
-        const gapLevel = getDelayedCopyingGapLevel();
+    // Handle multi-word / percentage removal (25%, 50%, 75%, 100%)
+    if (STUDENT_MULTI_GAP_ACTIVITIES.includes(actType)) {
+        const gapLevel = getActivityGapLevel(actType);
         if (gapLevel !== '1') {
             const words = text.split(' ');
             const wordEntries = words
@@ -687,6 +714,51 @@ function makeStudentGapHTML(text, itemIdx, actType, savedVal = '', savedGapValue
 // Helper to update One-by-One submit button visibility based on input text
 function updateOneByOneSubmitVisibility() {
     checkOneByOneItemCompletion();
+}
+
+function attachMultiGapInputsBehavior(inputs, actType, itemIdx) {
+    if (!inputs || inputs.length === 0) return;
+
+    inputs.forEach((inp, idx) => {
+        inp.onfocus = function() {
+            activeInputForVK = this;
+        };
+        inp.oninput = function() {
+            saveStudentCurrentExerciseResponses();
+            checkExerciseCompletion();
+            checkOneByOneItemCompletion();
+        };
+        inp.onkeydown = function(e) {
+            if (e.key === ' ' && inputs.length > 1 && inp.value.trim().length > 0 && idx < inputs.length - 1) {
+                e.preventDefault();
+                inputs[idx + 1].focus();
+            } else if (e.key === 'Backspace' && inp.value === '' && idx > 0) {
+                e.preventDefault();
+                inputs[idx - 1].focus();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (inputs.length > 1) {
+                    const nextEmpty = inputs.find(i => !i.value.trim());
+                    if (nextEmpty) {
+                        nextEmpty.focus();
+                        return;
+                    }
+                }
+                const submitBtn = document.getElementById('one-by-one-submit-btn');
+                if (submitBtn && submitBtn.style.display !== 'none') {
+                    submitBtn.click();
+                } else if (inputs.every(i => i.value.trim().length > 0)) {
+                    const sents = currentStudentAssignment?.sentencesPerActivity?.[actType] || [];
+                    const isLast = (itemIdx === sents.length - 1);
+                    if (!isLast) {
+                        navigateOneByOneItem(1);
+                    } else {
+                        submitCurrentExercise();
+                    }
+                }
+            }
+        };
+    });
 }
 
 /* =========================================================
@@ -849,11 +921,13 @@ function renderCurrentStudentExercise() {
             setTimeout(() => speakTL(targetText), 200);
         } 
         else if (actType === 'listen-dictation') {
-            const gapObj = makeStudentGapHTML(targetText, studentSubItemIndex, 'listen-dictation', savedVal);
+            const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
+            const savedGapValues = Array.isArray(savedResp?.gapValues) ? savedResp.gapValues : null;
+            const gapObj = makeStudentGapHTML(targetText, studentSubItemIndex, 'listen-dictation', savedVal, savedGapValues);
             cardContentHTML = `
                 <div style="text-align:center; padding:20px 0;">
                     <button type="button" onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:25px; cursor:pointer;">🔊 Listen Audio</button>
-                    <div style="font-size:26px; font-weight:bold; color:#1e293b; margin-bottom:20px; line-height:1.5;">${gapObj.html}</div>
+                    <div style="font-size:26px; font-weight:bold; color:#1e293b; margin-bottom:20px; line-height:1.8;">${gapObj.html}</div>
                 </div>`;
             setTimeout(() => speakTL(targetText), 200);
         } 
@@ -1185,7 +1259,12 @@ function renderCurrentStudentExercise() {
             }
         }
 
-        area.querySelectorAll('.full-typing-input, .gap-inline-input').forEach(inp => {
+        const inlineGapInputs = Array.from(area.querySelectorAll('.gap-inline-input'));
+        if (inlineGapInputs.length > 0) {
+            attachMultiGapInputsBehavior(inlineGapInputs, actType, studentSubItemIndex);
+        }
+
+        area.querySelectorAll('.full-typing-input').forEach(inp => {
             inp.onfocus = function() {
                 activeInputForVK = this;
             };
@@ -1256,8 +1335,8 @@ function navigateOneByOneItem(direction) {
 }
 
 function runStudentDelayedDictation(targetText, itemIdx) {
-    const existingInp = document.querySelector('#dd-student-stage .gap-inline-input');
-    const preservedVal = existingInp ? existingInp.value : '';
+    const existingInputs = Array.from(document.querySelectorAll('#dd-student-stage .gap-inline-input'));
+    const preservedGapValues = existingInputs.length > 0 ? existingInputs.map(i => i.value) : null;
 
     clearStudentOneByOneTimers();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
@@ -1266,11 +1345,11 @@ function runStudentDelayedDictation(targetText, itemIdx) {
     if (!stageEl) return;
 
     const actType = 'delayed-dictation';
-    const savedVal = preservedVal || (
-        (studentAnswersState[actType]?.[itemIdx]?.studentAnswer !== '(Empty)')
-            ? (studentAnswersState[actType]?.[itemIdx]?.studentAnswer || '')
-            : ''
-    );
+    const savedResp = studentAnswersState[actType]?.[itemIdx];
+    const savedGapValues = preservedGapValues || (Array.isArray(savedResp?.gapValues) ? savedResp.gapValues : null);
+    const savedVal = (savedResp?.studentAnswer && savedResp.studentAnswer !== '(Empty)')
+        ? savedResp.studentAnswer
+        : '';
     const safeTarget = targetText.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
     stageEl.innerHTML = `
@@ -1294,12 +1373,12 @@ function runStudentDelayedDictation(targetText, itemIdx) {
                 if (statusText) statusText.innerHTML = `🧠 Memorise! <span style="font-size:28px; color:#d97706;">${count}</span>s`;
             } else {
                 clearStudentOneByOneTimers();
-                // Stage 3: Display TL sentence with missing word input box (re-attempt hidden for 15s)
-                const gapObj = makeStudentGapHTML(targetText, itemIdx, 'delayed-dictation', savedVal);
+                // Stage 3: Display TL sentence with missing word input box(es) (re-attempt hidden for 15s)
+                const gapObj = makeStudentGapHTML(targetText, itemIdx, 'delayed-dictation', savedVal, savedGapValues);
                 if (statusText) {
                     statusText.style.color = '#1e293b';
                     statusText.innerHTML = `
-                        <div style="margin-bottom:15px;">${gapObj.html}</div>
+                        <div style="margin-bottom:15px; line-height:1.8;">${gapObj.html}</div>
                         <button type="button" id="dd-reattempt-btn" onclick="runStudentDelayedDictation('${safeTarget}', ${itemIdx})" class="btn-outline" style="display:none; font-size:13px; margin-top:10px;">🔁 Try Again</button>
                     `;
                 }
@@ -1310,34 +1389,15 @@ function runStudentDelayedDictation(targetText, itemIdx) {
                 }, 15000);
                 studentOneByOneTimers.push(revealTimer);
 
-                const inp = statusText ? statusText.querySelector('.gap-inline-input') : null;
-                if (inp) {
+                const inputs = statusText ? Array.from(statusText.querySelectorAll('.gap-inline-input')) : [];
+                if (inputs.length > 0) {
                     setTimeout(() => {
-                        inp.focus();
-                        activeInputForVK = inp;
+                        const firstEmpty = inputs.find(i => !i.value.trim()) || inputs[0];
+                        firstEmpty.focus();
+                        activeInputForVK = firstEmpty;
                     }, 20);
-                    updateOneByOneSubmitVisibility(inp);
-                    inp.addEventListener('focus', () => {
-                        activeInputForVK = inp;
-                    });
-                    inp.addEventListener('input', () => {
-                        saveStudentCurrentExerciseResponses();
-                        checkExerciseCompletion();
-                        updateOneByOneSubmitVisibility(inp);
-                    });
-                    inp.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter') {
-                            e.preventDefault();
-                            if (!inp.value.trim()) return;
-                            const sents = currentStudentAssignment.sentencesPerActivity[actType] || [];
-                            const isLast = (itemIdx === sents.length - 1);
-                            if (!isLast) {
-                                navigateOneByOneItem(1);
-                            } else {
-                                submitCurrentExercise();
-                            }
-                        }
-                    });
+                    checkOneByOneItemCompletion();
+                    attachMultiGapInputsBehavior(inputs, actType, itemIdx);
                 }
 
                 if (window.studentCompletedExercises && window.studentCompletedExercises[actType] && !window.isTeacherPreview) {
@@ -1433,40 +1493,7 @@ function runStudentDelayedCopying(targetText, itemIdx) {
                             activeInputForVK = firstEmpty;
                         }, 20);
                         checkOneByOneItemCompletion();
-
-                        inputs.forEach((inp, idx) => {
-                            inp.addEventListener('focus', () => {
-                                activeInputForVK = inp;
-                            });
-                            inp.addEventListener('input', () => {
-                                saveStudentCurrentExerciseResponses();
-                                checkExerciseCompletion();
-                                checkOneByOneItemCompletion();
-                            });
-                            inp.addEventListener('keydown', (e) => {
-                                if (e.key === ' ' && inputs.length > 1 && inp.value.trim().length > 0 && idx < inputs.length - 1) {
-                                    e.preventDefault();
-                                    inputs[idx + 1].focus();
-                                } else if (e.key === 'Backspace' && inp.value === '' && idx > 0) {
-                                    e.preventDefault();
-                                    inputs[idx - 1].focus();
-                                } else if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    const nextEmpty = inputs.find(i => !i.value.trim());
-                                    if (nextEmpty) {
-                                        nextEmpty.focus();
-                                        return;
-                                    }
-                                    const sents = currentStudentAssignment.sentencesPerActivity[actType] || [];
-                                    const isLast = (itemIdx === sents.length - 1);
-                                    if (!isLast) {
-                                        navigateOneByOneItem(1);
-                                    } else {
-                                        submitCurrentExercise();
-                                    }
-                                }
-                            });
-                        });
+                        attachMultiGapInputsBehavior(inputs, actType, itemIdx);
                     }
 
                     if (window.studentCompletedExercises && window.studentCompletedExercises[actType] && !window.isTeacherPreview) {
@@ -1858,6 +1885,9 @@ function saveStudentCurrentExerciseResponses() {
 
                 const isMatch = (normalizeString(ans) === normalizeString(correct));
                 const points = isMatch ? 1.0 : 0.0;
+                const preservedGapValues = (Array.isArray(prevResp.gapValues) && prevResp.gapValues.some(v => v && v.trim()) && !currentInput)
+                    ? prevResp.gapValues
+                    : [ans];
 
                 responses[studentSubItemIndex] = {
                     prompt: isTarget ? s.tr : s.t,
@@ -1865,7 +1895,7 @@ function saveStudentCurrentExerciseResponses() {
                     correctAnswer: correct || fullText,
                     isCorrect: points === 1.0,
                     points: points,
-                    gapValues: [ans]
+                    gapValues: preservedGapValues
                 };
             }
         }
