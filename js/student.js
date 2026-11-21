@@ -1987,6 +1987,7 @@ function saveStudentCurrentExerciseResponses() {
         }
     } 
     // --- DICTATION / LISTENING / DELAYED COPYING ACTIVITIES ---
+    // --- DICTATION / LISTENING / DELAYED COPYING ACTIVITIES ---
     else if (['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'].includes(actType)) {
         const s = sents[studentSubItemIndex];
         if (s) {
@@ -1995,7 +1996,19 @@ function saveStudentCurrentExerciseResponses() {
             const inputs = Array.from(area.querySelectorAll('.gap-inline-input'));
             const prevResp = responses[studentSubItemIndex] || {};
 
-            if (inputs.length > 1) {
+            if (inputs.length === 0) {
+                // Input boxes aren't on screen yet (audio or 3s countdown is running); keep existing saved score/answer
+                if (!prevResp.studentAnswer) {
+                    responses[studentSubItemIndex] = {
+                        prompt: isTarget ? s.tr : s.t,
+                        studentAnswer: '(Empty)',
+                        correctAnswer: fullText,
+                        isCorrect: false,
+                        points: 0,
+                        gapValues: prevResp.gapValues || []
+                    };
+                }
+            } else if (inputs.length > 1) {
                 const gapValues = inputs.map(inp => inp.value.trim());
                 const correctWords = inputs.map(inp => (inp.dataset.correct || '').trim());
                 let matchedCount = 0;
