@@ -1,7 +1,7 @@
 /* =========================
    STUDENT PORTAL & MARKSHEET REVIEW
 ========================= */
-const STUDENT_MULTI_GAP_ACTIVITIES = ['listen-dictation', 'delayed-dictation', 'delayed-copying'];
+const STUDENT_MULTI_GAP_ACTIVITIES = ['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'];
 
 function getCleanActivityTitle(type, lang) {
     const map = {
@@ -26,6 +26,7 @@ function getCleanActivityTitle(type, lang) {
 
 function getActivityGapLevel(actType) {
     const fieldMap = {
+        'listen-trad': 'listenTradGapLevel',
         'listen-dictation': 'listenDictationGapLevel',
         'delayed-dictation': 'delayedDictationGapLevel',
         'delayed-copying': 'delayedCopyingGapLevel'
@@ -38,12 +39,18 @@ function getActivityGapLevel(actType) {
     const cleaned = String(raw).replace('%', '').trim();
     return ['1', '25', '50', '75', '100'].includes(cleaned) ? cleaned : '1';
 }
-
 function getDelayedCopyingGapLevel() {
     return getActivityGapLevel('delayed-copying');
 }
 
 function getActivityInstruction(type, lang) {
+    const ltLevel = getActivityGapLevel('listen-trad');
+    const ltInstruction = ltLevel === '1'
+        ? 'Listen to the audio and fill in the missing English word.'
+        : (ltLevel === '100'
+            ? 'Listen to the audio and type all the missing English words.'
+            : 'Listen to the audio and fill in the missing English words.');
+
     const ldLevel = getActivityGapLevel('listen-dictation');
     const ldInstruction = ldLevel === '1'
         ? `Listen to the audio and fill in the missing ${lang} word.`
@@ -77,7 +84,7 @@ function getActivityInstruction(type, lang) {
         'faulty': 'Click on the wrong word in the English translation.',
         'trans-en': `Translate the ${lang} sentence into English.`,
         'trans-target': `Translate the English sentence into ${lang}.`,
-        'listen-trad': 'Listen to the audio and fill in the missing English word.',
+        'listen-trad': ltInstruction,
         'listen-dictation': ldInstruction,
         'delayed-dictation': ddInstruction,
         'delayed-copying': dcInstruction
@@ -911,15 +918,17 @@ function renderCurrentStudentExercise() {
 
         let cardContentHTML = '';
 
-        if (actType === 'listen-trad') {
-            const gapObj = makeStudentGapHTML(englishText, studentSubItemIndex, 'listen-trad', savedVal);
+       if (actType === 'listen-trad') {
+            const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
+            const savedGapValues = Array.isArray(savedResp?.gapValues) ? savedResp.gapValues : null;
+            const gapObj = makeStudentGapHTML(englishText, studentSubItemIndex, 'listen-trad', savedVal, savedGapValues);
             cardContentHTML = `
                 <div style="text-align:center; padding:20px 0;">
                     <button type="button" onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:25px; cursor:pointer;">🔊 Listen Audio</button>
-                    <div style="font-size:26px; font-weight:bold; color:#1e293b; margin-bottom:20px; line-height:1.5;">${gapObj.html}</div>
+                    <div style="font-size:26px; font-weight:bold; color:#1e293b; margin-bottom:20px; line-height:1.8;">${gapObj.html}</div>
                 </div>`;
             setTimeout(() => speakTL(targetText), 200);
-        } 
+        }
         else if (actType === 'listen-dictation') {
             const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
             const savedGapValues = Array.isArray(savedResp?.gapValues) ? savedResp.gapValues : null;
