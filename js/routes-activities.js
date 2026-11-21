@@ -1,6 +1,56 @@
 /* =========================
    PREVIEW & OPTIONS MENU
 ========================= */
+function getDelayedCopyingGapOptionsHTML(selectedLevel = '1') {
+    const normalized = ['1', '25', '50', '75', '100'].includes(String(selectedLevel))
+        ? String(selectedLevel)
+        : '1';
+    const options = [
+        { val: '1', label: '1 word' },
+        { val: '25', label: '25% of words' },
+        { val: '50', label: '50% of words' },
+        { val: '75', label: '75% of words' },
+        { val: '100', label: '100% of words' }
+    ];
+    return options
+        .map(o => `<option value="${o.val}" ${o.val === normalized ? 'selected' : ''}>${o.label}</option>`)
+        .join('');
+}
+
+function onDelayedCopyingGapLevelChange(selectEl) {
+    const chk = document.getElementById('chk-delayed-copying');
+    if (chk && !chk.checked) {
+        chk.checked = true;
+        renderPerActivitySentenceBoxes();
+        return;
+    }
+    const badge = document.getElementById('dc-card-gap-badge');
+    if (badge && selectEl) {
+        const label = selectEl.options[selectEl.selectedIndex]?.text || '1 word';
+        badge.innerText = `(${label} removed)`;
+    }
+}
+
+function buildActivitySelectorRowHTML(a, selectedDcGapLevel = '1', extraRowStyle = 'padding: 6px 8px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 8px;') {
+    const dropdownHTML = (a.id === 'delayed-copying')
+        ? `<select id="delayed-copying-gap-select"
+                onclick="event.stopPropagation()"
+                onchange="event.stopPropagation(); onDelayedCopyingGapLevelChange(this)"
+                title="Choose how many words are removed in Delayed Copying"
+                style="margin-left:auto; padding:3px 8px; border-radius:6px; border:1px solid #cbd5e1; font-size:12px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                ${getDelayedCopyingGapOptionsHTML(selectedDcGapLevel)}
+           </select>`
+        : '';
+
+    return `
+        <div class="activity-row" style="${extraRowStyle}">
+            <input type="checkbox" value="${a.id}" id="chk-${a.id}" onchange="renderPerActivitySentenceBoxes()">
+            <label for="chk-${a.id}" style="cursor:pointer; font-weight:500; font-size: 13px;">${a.label}</label>
+            ${dropdownHTML}
+        </div>
+    `;
+}
+
 function openPreview() {
     const modal = document.getElementById('preview-modal');
     const overlay = document.getElementById('overlay');
@@ -102,12 +152,9 @@ function openActivityMenu() {
         {id:'delayed-copying', label:'Delayed Copying'}
     ];
 
-    document.getElementById('activity-list').innerHTML = list.map(a => `
-        <div class="activity-row" style="padding: 6px 8px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 8px;">
-            <input type="checkbox" value="${a.id}" id="chk-${a.id}" onchange="renderPerActivitySentenceBoxes()">
-            <label for="chk-${a.id}" style="cursor:pointer; font-weight:500; font-size: 13px;">${a.label}</label>
-        </div>
-    `).join('');
+    document.getElementById('activity-list').innerHTML = list
+        .map(a => buildActivitySelectorRowHTML(a, '1'))
+        .join('');
     
     renderPerActivitySentenceBoxes();
     document.getElementById('activity-menu').style.display = 'flex';
@@ -1034,11 +1081,19 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
             return;
         }
 
+        let dcGapBadgeHTML = '';
+        if (actId === 'delayed-copying') {
+            const dcSelect = document.getElementById('delayed-copying-gap-select');
+            const dcLabel = dcSelect ? (dcSelect.options[dcSelect.selectedIndex]?.text || '1 word') : '1 word';
+            dcGapBadgeHTML = `<span id="dc-card-gap-badge" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${dcLabel} removed)</span>`;
+        }
+
         html += `
             <div class="act-sentence-card" id="act-card-${actId}">
                 <div class="act-card-header" onclick="toggleActivityCollapse('${actId}')">
-                    <span style="display:flex; align-items:center; gap:10px;">
+                    <span style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                         ✏️ ${actLabel} (${actSents.length} Sentences)
+                        ${dcGapBadgeHTML}
                         <button type="button" 
                             style="padding: 2px 8px; font-size: 12px; margin: 0; background: white; border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; font-weight:600; color:#334155;" 
                             onclick="refreshActivitySentences('${actId}', event)" 
@@ -1490,6 +1545,10 @@ async function publishTaskToClassroom() {
     const selectedActivities = Array.from(document.querySelectorAll('#activity-list input:checked')).map(c => c.value);
     if (selectedActivities.length === 0) return alert("Select at least one activity!");
 
+    const delayedCopyingGapLevel = selectedActivities.includes('delayed-copying')
+        ? (document.getElementById('delayed-copying-gap-select')?.value || '1')
+        : '1';
+
     const tableLimit = parseInt(document.getElementById('table-sentence-count').value, 10);
     const allSentences = getAssembledSentences();
 
@@ -1584,6 +1643,7 @@ async function publishTaskToClassroom() {
                 builderId: targetBuilderId,
                 builderSnapshot: builderSnapshot,
                 selectedActivities: selectedActivities,
+                delayedCopyingGapLevel: delayedCopyingGapLevel,
                 sentencesPerActivity: structuredSentencesPerActivity,
                 maxPoints: maxPoints > 0 ? maxPoints : 10,
                 dueDate: dueDateVal ? new Date(dueDateVal).toISOString() : null,
@@ -1677,6 +1737,7 @@ async function publishTaskToClassroom() {
         title: title,
         lang: window.duplicatingAssignmentLang || document.getElementById('meta-lang').value || meta.lang || "French",
         selectedActivities: selectedActivities,
+        delayedCopyingGapLevel: delayedCopyingGapLevel,
         sentencesPerActivity: structuredSentencesPerActivity,
         maxPoints: maxPoints > 0 ? maxPoints : 10,
         dueDate: dueDateVal ? new Date(dueDateVal).toISOString() : null,
