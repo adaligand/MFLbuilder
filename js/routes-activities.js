@@ -65,7 +65,7 @@ function resolveActivityGapLevelFromArg(actId, gapLevelsOrSingle = '1') {
     return actId === 'delayed-copying' ? String(gapLevelsOrSingle || '1') : '1';
 }
 
-function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle = 'padding: 6px 6px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 6px;') {
+function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle = 'flex: 0 0 auto !important; height: auto !important; min-height: 0 !important; padding: 6px 6px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 6px;') {
     const isMultiGap = MULTI_GAP_ACTIVITY_IDS.includes(a.id);
     const selectedLevel = resolveActivityGapLevelFromArg(a.id, gapLevelsOrSingle);
 
@@ -90,11 +90,11 @@ function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle 
 
 function buildActivityCategoryGroupHTML(category, title, icon, innerRowsHTML, isOpen = false) {
     return `
-        <div class="activity-category-group" data-category="${category}" style="border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; background: #ffffff; margin-bottom: 6px; flex-shrink: 0;">
+        <div class="activity-category-group" data-category="${category}" style="flex: 0 0 auto !important; height: auto !important; min-height: 0 !important; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; background: #ffffff; margin-bottom: 6px;">
             <button type="button"
                 id="btn-toggle-${category}-activities"
                 onclick="toggleActivityCategory('${category}')"
-                style="width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: #f1f5f9; border: none; border-bottom: ${isOpen ? '1px solid #e2e8f0' : 'none'}; cursor: pointer; font-weight: 700; font-size: 13px; color: #1e293b; text-align: left;">
+                style="flex: 0 0 auto !important; width: 100% !important; height: auto !important; min-height: 0 !important; display: flex !important; align-items: center; justify-content: space-between; padding: 9px 10px !important; margin: 0 !important; background: #f1f5f9 !important; border: none !important; border-bottom: ${isOpen ? '1px solid #e2e8f0' : 'none'} !important; border-radius: 0 !important; cursor: pointer; font-weight: 700; font-size: 13px; color: #1e293b !important; text-align: left; box-shadow: none !important;">
                 <span style="display: flex; align-items: center; gap: 6px;">
                     <span>${icon}</span>
                     <span>${title}</span>
@@ -104,7 +104,7 @@ function buildActivityCategoryGroupHTML(category, title, icon, innerRowsHTML, is
                     <span id="chevron-${category}" style="font-size: 11px; color: #475569;">${isOpen ? '▼' : '▶'}</span>
                 </span>
             </button>
-            <div id="group-${category}-activities" style="padding: 4px 6px; display: ${isOpen ? 'flex' : 'none'}; flex-direction: column; gap: 2px;">
+            <div id="group-${category}-activities" style="flex: 0 0 auto !important; height: auto !important; min-height: 0 !important; padding: 4px 6px; display: ${isOpen ? 'flex' : 'none'}; flex-direction: column; gap: 2px;">
                 ${innerRowsHTML}
             </div>
         </div>
@@ -120,6 +120,17 @@ function toggleActivityCategory(category, forceOpen = null) {
     const isCurrentlyOpen = listEl.style.display !== 'none';
     const shouldOpen = forceOpen !== null ? forceOpen : !isCurrentlyOpen;
 
+    // Exclusive accordion: unfolding one category automatically collapses the other
+    if (shouldOpen) {
+        const otherCategory = category === 'text' ? 'audio' : 'text';
+        const otherListEl = document.getElementById(`group-${otherCategory}-activities`);
+        const otherBtnEl = document.getElementById(`btn-toggle-${otherCategory}-activities`);
+        const otherChevronEl = document.getElementById(`chevron-${otherCategory}`);
+        if (otherListEl) otherListEl.style.display = 'none';
+        if (otherBtnEl) otherBtnEl.style.borderBottom = 'none';
+        if (otherChevronEl) otherChevronEl.textContent = '▶';
+    }
+
     listEl.style.display = shouldOpen ? 'flex' : 'none';
     if (btnEl) {
         btnEl.style.borderBottom = shouldOpen ? '1px solid #e2e8f0' : 'none';
@@ -130,6 +141,7 @@ function toggleActivityCategory(category, forceOpen = null) {
 }
 
 function updateActivityCategoryCounts(autoExpandChecked = false) {
+    let expandedOne = false;
     ['text', 'audio'].forEach(category => {
         const listEl = document.getElementById(`group-${category}-activities`);
         const badgeEl = document.getElementById(`badge-count-${category}`);
@@ -139,8 +151,9 @@ function updateActivityCategoryCounts(autoExpandChecked = false) {
         if (checkedCount > 0) {
             badgeEl.textContent = String(checkedCount);
             badgeEl.style.display = 'inline-block';
-            if (autoExpandChecked) {
+            if (autoExpandChecked && !expandedOne) {
                 toggleActivityCategory(category, true);
+                expandedOne = true;
             }
         } else {
             badgeEl.style.display = 'none';
@@ -166,6 +179,9 @@ function ensureGroupedActivityList() {
     const audioGroup = document.getElementById('group-audio-activities');
 
     existingRows.forEach(row => {
+        row.style.flex = '0 0 auto';
+        row.style.height = 'auto';
+        row.style.minHeight = '0';
         const cb = row.querySelector('input[type="checkbox"]');
         const actId = cb ? cb.value : '';
         if (AUDIO_ACTIVITY_IDS.includes(actId)) {
