@@ -939,13 +939,14 @@ async function inspectStudentAnswers(subId) {
                     <div style="padding:12px;">
                         ${(act.responses || []).map((r, i) => {
                             const currentScore = r.points !== undefined ? r.points : (r.isCorrect ? 1 : 0);
+                            const showMistakeBadge = r.mistakes !== undefined && (r.mistakes > 0 || currentScore > 0);
                             return `
                                 <div style="padding:8px 0; border-bottom:1px solid #f1f5f9; display:flex; justify-content:space-between; align-items:center; gap:10px;">
                                     <div style="flex:1;">
                                         <div><b>${i + 1}. Prompt:</b> ${r.prompt}</div>
                                         <div style="color:${currentScore >= 1 ? '#10b981' : (currentScore > 0 ? '#d97706' : '#ef4444')}; margin-top:2px;">
                                             <b>Student Answer:</b> ${r.studentAnswer}
-                                            ${r.mistakes !== undefined ? `
+                                            ${showMistakeBadge ? `
                                                 <span style="display:inline-block; margin-left:8px; font-size:11px; padding:2px 6px; border-radius:4px; font-weight:bold; background:${r.mistakes === 0 ? '#d1fae5' : '#fef3c7'}; color:${r.mistakes === 0 ? '#065f46' : '#92400e'};">
                                                     ${r.mistakes === 0 ? '✓' : `⚠️ ${r.mistakes} Mistake(s)`}
                                                 </span>
