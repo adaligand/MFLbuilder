@@ -2,6 +2,14 @@
    PREVIEW & OPTIONS MENU
 ========================= */
 const MULTI_GAP_ACTIVITY_IDS = ['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'];
+const AUDIO_ACTIVITY_IDS = [
+    'listen-trad',
+    'listen-dictation',
+    'delayed-dictation',
+    'listen-missing',
+    'listen-faulty',
+    'listen-jumbled'
+];
 
 function getActivityGapOptionsHTML(selectedLevel = '1') {
     const normalized = ['1', '25', '50', '75', '100'].includes(String(selectedLevel))
@@ -57,7 +65,7 @@ function resolveActivityGapLevelFromArg(actId, gapLevelsOrSingle = '1') {
     return actId === 'delayed-copying' ? String(gapLevelsOrSingle || '1') : '1';
 }
 
-function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle = 'padding: 6px 8px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 8px;') {
+function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle = 'padding: 6px 6px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 6px;') {
     const isMultiGap = MULTI_GAP_ACTIVITY_IDS.includes(a.id);
     const selectedLevel = resolveActivityGapLevelFromArg(a.id, gapLevelsOrSingle);
 
@@ -66,7 +74,7 @@ function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle 
                 onclick="event.stopPropagation()"
                 onchange="event.stopPropagation(); onActivityGapLevelChange('${a.id}', this)"
                 title="Choose how many words are removed in ${a.label}"
-                style="margin-left:auto; padding:3px 8px; border-radius:6px; border:1px solid #cbd5e1; font-size:12px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                style="margin-left:auto; max-width:112px; padding:3px 6px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
                 ${getActivityGapOptionsHTML(selectedLevel)}
            </select>`
         : '';
@@ -74,10 +82,98 @@ function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle 
     return `
         <div class="activity-row" style="${extraRowStyle}">
             <input type="checkbox" value="${a.id}" id="chk-${a.id}" onchange="renderPerActivitySentenceBoxes()">
-            <label for="chk-${a.id}" style="cursor:pointer; font-weight:500; font-size: 13px;">${a.label}</label>
+            <label for="chk-${a.id}" style="cursor:pointer; font-weight:500; font-size: 13px; line-height: 1.25;">${a.label}</label>
             ${dropdownHTML}
         </div>
     `;
+}
+
+function buildActivityCategoryGroupHTML(category, title, icon, innerRowsHTML, isOpen = false) {
+    return `
+        <div class="activity-category-group" data-category="${category}" style="border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; background: #ffffff; margin-bottom: 6px; flex-shrink: 0;">
+            <button type="button"
+                id="btn-toggle-${category}-activities"
+                onclick="toggleActivityCategory('${category}')"
+                style="width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: #f1f5f9; border: none; border-bottom: ${isOpen ? '1px solid #e2e8f0' : 'none'}; cursor: pointer; font-weight: 700; font-size: 13px; color: #1e293b; text-align: left;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <span>${icon}</span>
+                    <span>${title}</span>
+                </span>
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <span id="badge-count-${category}" style="display: none; background: #2563eb; color: #ffffff; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px;">0</span>
+                    <span id="chevron-${category}" style="font-size: 11px; color: #475569;">${isOpen ? '▼' : '▶'}</span>
+                </span>
+            </button>
+            <div id="group-${category}-activities" style="padding: 4px 6px; display: ${isOpen ? 'flex' : 'none'}; flex-direction: column; gap: 2px;">
+                ${innerRowsHTML}
+            </div>
+        </div>
+    `;
+}
+
+function toggleActivityCategory(category, forceOpen = null) {
+    const listEl = document.getElementById(`group-${category}-activities`);
+    const btnEl = document.getElementById(`btn-toggle-${category}-activities`);
+    const chevronEl = document.getElementById(`chevron-${category}`);
+    if (!listEl) return;
+
+    const isCurrentlyOpen = listEl.style.display !== 'none';
+    const shouldOpen = forceOpen !== null ? forceOpen : !isCurrentlyOpen;
+
+    listEl.style.display = shouldOpen ? 'flex' : 'none';
+    if (btnEl) {
+        btnEl.style.borderBottom = shouldOpen ? '1px solid #e2e8f0' : 'none';
+    }
+    if (chevronEl) {
+        chevronEl.textContent = shouldOpen ? '▼' : '▶';
+    }
+}
+
+function updateActivityCategoryCounts(autoExpandChecked = false) {
+    ['text', 'audio'].forEach(category => {
+        const listEl = document.getElementById(`group-${category}-activities`);
+        const badgeEl = document.getElementById(`badge-count-${category}`);
+        if (!listEl || !badgeEl) return;
+
+        const checkedCount = listEl.querySelectorAll('input[type="checkbox"]:checked').length;
+        if (checkedCount > 0) {
+            badgeEl.textContent = String(checkedCount);
+            badgeEl.style.display = 'inline-block';
+            if (autoExpandChecked) {
+                toggleActivityCategory(category, true);
+            }
+        } else {
+            badgeEl.style.display = 'none';
+        }
+    });
+}
+
+function ensureGroupedActivityList() {
+    const container = document.getElementById('activity-list');
+    if (!container) return;
+    if (document.getElementById('group-text-activities') && document.getElementById('group-audio-activities')) {
+        return;
+    }
+
+    const existingRows = Array.from(container.querySelectorAll('.activity-row'));
+    if (existingRows.length === 0) return;
+
+    container.innerHTML =
+        buildActivityCategoryGroupHTML('text', 'Text Activities', '📝', '', true) +
+        buildActivityCategoryGroupHTML('audio', 'Audio Activities', '🎧', '', false);
+
+    const textGroup = document.getElementById('group-text-activities');
+    const audioGroup = document.getElementById('group-audio-activities');
+
+    existingRows.forEach(row => {
+        const cb = row.querySelector('input[type="checkbox"]');
+        const actId = cb ? cb.value : '';
+        if (AUDIO_ACTIVITY_IDS.includes(actId)) {
+            audioGroup.appendChild(row);
+        } else {
+            textGroup.appendChild(row);
+        }
+    });
 }
 
 function openPreview() {
@@ -191,9 +287,15 @@ function openActivityMenu() {
         'delayed-copying': '1'
     };
 
-    document.getElementById('activity-list').innerHTML = list
-        .map(a => buildActivitySelectorRowHTML(a, defaultGapLevels))
-        .join('');
+    const textActivities = list.filter(a => !AUDIO_ACTIVITY_IDS.includes(a.id));
+    const audioActivities = list.filter(a => AUDIO_ACTIVITY_IDS.includes(a.id));
+
+    const textRowsHTML = textActivities.map(a => buildActivitySelectorRowHTML(a, defaultGapLevels)).join('');
+    const audioRowsHTML = audioActivities.map(a => buildActivitySelectorRowHTML(a, defaultGapLevels)).join('');
+
+    document.getElementById('activity-list').innerHTML =
+        buildActivityCategoryGroupHTML('text', 'Text Activities', '📝', textRowsHTML, true) +
+        buildActivityCategoryGroupHTML('audio', 'Audio Activities', '🎧', audioRowsHTML, false);
     
     renderPerActivitySentenceBoxes();
     document.getElementById('activity-menu').style.display = 'flex';
@@ -1054,8 +1156,11 @@ function refreshActivitySentences(actId, e) {
 }
 
 function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
+    ensureGroupedActivityList();
+    updateActivityCategoryCounts(Boolean(overrideSentencesMap));
+
     const container = document.getElementById('per-activity-sentences-container');
-    const checkedBoxes = Array.from(document.querySelectorAll('#activity-list input:checked'));
+    const checkedBoxes = Array.from(document.querySelectorAll('#activity-list input[type="checkbox"]:checked'));
 
     if (checkedBoxes.length === 0) {
         container.innerHTML = '<div style="color:#64748b; font-style:italic; padding:10px;">Select at least one activity above to customize its sentences.</div>';
@@ -1590,10 +1695,10 @@ async function publishTaskToClassroom() {
 
     if (!courseId) return alert("Select a Google Classroom course.");
 
-    const selectedActivities = Array.from(document.querySelectorAll('#activity-list input:checked')).map(c => c.value);
+    const selectedActivities = Array.from(document.querySelectorAll('#activity-list input[type="checkbox"]:checked')).map(c => c.value);
     if (selectedActivities.length === 0) return alert("Select at least one activity!");
 
-   const listenTradGapLevel = selectedActivities.includes('listen-trad')
+    const listenTradGapLevel = selectedActivities.includes('listen-trad')
         ? (document.getElementById('listen-trad-gap-select')?.value || '1')
         : '1';
     const listenDictationGapLevel = selectedActivities.includes('listen-dictation')
@@ -1709,7 +1814,7 @@ async function publishTaskToClassroom() {
                 builderId: targetBuilderId,
                 builderSnapshot: builderSnapshot,
                 selectedActivities: selectedActivities,
-               listenTradGapLevel: listenTradGapLevel,
+                listenTradGapLevel: listenTradGapLevel,
                 listenDictationGapLevel: listenDictationGapLevel,
                 delayedDictationGapLevel: delayedDictationGapLevel,
                 delayedCopyingGapLevel: delayedCopyingGapLevel,
@@ -1807,7 +1912,7 @@ async function publishTaskToClassroom() {
         title: title,
         lang: window.duplicatingAssignmentLang || document.getElementById('meta-lang').value || meta.lang || "French",
         selectedActivities: selectedActivities,
-       listenTradGapLevel: listenTradGapLevel,
+        listenTradGapLevel: listenTradGapLevel,
         listenDictationGapLevel: listenDictationGapLevel,
         delayedDictationGapLevel: delayedDictationGapLevel,
         delayedCopyingGapLevel: delayedCopyingGapLevel,
