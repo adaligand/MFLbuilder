@@ -1,7 +1,7 @@
 /* =========================
    PREVIEW & OPTIONS MENU
 ========================= */
-const MULTI_GAP_ACTIVITY_IDS = ['listen-dictation', 'delayed-dictation', 'delayed-copying'];
+const MULTI_GAP_ACTIVITY_IDS = ['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'];
 
 function getActivityGapOptionsHTML(selectedLevel = '1') {
     const normalized = ['1', '25', '50', '75', '100'].includes(String(selectedLevel))
@@ -182,6 +182,7 @@ function openActivityMenu() {
     ];
 
     const defaultGapLevels = {
+        'listen-trad': '1',
         'listen-dictation': '1',
         'delayed-dictation': '1',
         'delayed-copying': '1'
@@ -1581,6 +1582,9 @@ async function publishTaskToClassroom() {
     const selectedActivities = Array.from(document.querySelectorAll('#activity-list input:checked')).map(c => c.value);
     if (selectedActivities.length === 0) return alert("Select at least one activity!");
 
+   const listenTradGapLevel = selectedActivities.includes('listen-trad')
+        ? (document.getElementById('listen-trad-gap-select')?.value || '1')
+        : '1';
     const listenDictationGapLevel = selectedActivities.includes('listen-dictation')
         ? (document.getElementById('listen-dictation-gap-select')?.value || '1')
         : '1';
@@ -1592,11 +1596,11 @@ async function publishTaskToClassroom() {
         : '1';
 
     const activityGapLevels = {
+        'listen-trad': listenTradGapLevel,
         'listen-dictation': listenDictationGapLevel,
         'delayed-dictation': delayedDictationGapLevel,
         'delayed-copying': delayedCopyingGapLevel
     };
-
     const tableLimit = parseInt(document.getElementById('table-sentence-count').value, 10);
     const allSentences = getAssembledSentences();
 
@@ -1691,6 +1695,7 @@ async function publishTaskToClassroom() {
                 builderId: targetBuilderId,
                 builderSnapshot: builderSnapshot,
                 selectedActivities: selectedActivities,
+               listenTradGapLevel: listenTradGapLevel,
                 listenDictationGapLevel: listenDictationGapLevel,
                 delayedDictationGapLevel: delayedDictationGapLevel,
                 delayedCopyingGapLevel: delayedCopyingGapLevel,
@@ -1788,6 +1793,7 @@ async function publishTaskToClassroom() {
         title: title,
         lang: window.duplicatingAssignmentLang || document.getElementById('meta-lang').value || meta.lang || "French",
         selectedActivities: selectedActivities,
+       listenTradGapLevel: listenTradGapLevel,
         listenDictationGapLevel: listenDictationGapLevel,
         delayedDictationGapLevel: delayedDictationGapLevel,
         delayedCopyingGapLevel: delayedCopyingGapLevel,
