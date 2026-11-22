@@ -43,7 +43,30 @@ function getAssignmentGapLevelMap(assign = {}) {
     };
 }
 
-function renderTeacherActivityListRows(list, selectedGapLevels = '1') {
+function normalizeRobotSpeedValue(rawSpeed) {
+    const cleaned = String(rawSpeed ?? 'normal').trim().toLowerCase();
+    return cleaned || 'normal';
+}
+
+function formatRobotSpeedLabel(rawSpeed) {
+    const val = normalizeRobotSpeedValue(rawSpeed);
+    const labels = {
+        'slow': 'Slow',
+        'normal': 'Normal',
+        'medium': 'Normal',
+        'fast': 'Fast',
+        'turbo': 'Turbo',
+        'very-fast': 'Turbo'
+    };
+    if (labels[val]) return labels[val];
+    const num = parseFloat(val);
+    if (!isNaN(num)) {
+        return num <= 4 ? `${num}x` : `${num}s`;
+    }
+    return val.charAt(0).toUpperCase() + val.slice(1);
+}
+
+function renderTeacherActivityListRows(list, selectedGapLevels = '1', selectedRobotSpeed = 'normal') {
     const gapMap = (selectedGapLevels && typeof selectedGapLevels === 'object')
         ? {
             'listen-trad': normalizeGapLevelValue(selectedGapLevels['listen-trad'] || '1'),
@@ -57,6 +80,8 @@ function renderTeacherActivityListRows(list, selectedGapLevels = '1') {
             'delayed-dictation': '1',
             'delayed-copying': normalizeGapLevelValue(selectedGapLevels)
         };
+    const normalizedSpeed = normalizeRobotSpeedValue(selectedRobotSpeed);
+
     const buildOptionsHTML = (selectedVal) => [
         { val: '1', label: '1 word' },
         { val: '25', label: '25% of words' },
@@ -65,8 +90,21 @@ function renderTeacherActivityListRows(list, selectedGapLevels = '1') {
         { val: '100', label: '100% of words' }
     ].map(o => `<option value="${o.val}" ${o.val === selectedVal ? 'selected' : ''}>${o.label}</option>`).join('');
 
+    const buildRobotOptions = (selectedVal) => {
+        if (typeof getRobotSpeedOptionsHTML === 'function') {
+            return getRobotSpeedOptionsHTML(selectedVal);
+        }
+        return [
+            { val: 'slow', label: '🐢 Slow' },
+            { val: 'normal', label: '🤖 Normal' },
+            { val: 'fast', label: '⚡ Fast' },
+            { val: 'turbo', label: '🚀 Turbo' }
+        ].map(o => `<option value="${o.val}" ${o.val === selectedVal ? 'selected' : ''}>${o.label}</option>`).join('');
+    };
+
     return list.map(a => {
         const hasGapDropdown = TEACHER_GAP_DROPDOWN_ACTIVITIES.includes(a.id);
+        const isBeatRobot = (a.id === 'beat-robot');
         const selectId = `${a.id}-gap-select`;
         const selectedVal = gapMap[a.id] || '1';
 
@@ -82,6 +120,15 @@ function renderTeacherActivityListRows(list, selectedGapLevels = '1') {
                             title="Choose how many words are removed in ${a.label.replace(/^🎧\s*/, '')}"
                             style="margin-left:auto; padding:3px 8px; border-radius:6px; border:1px solid #cbd5e1; font-size:12px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
                         ${buildOptionsHTML(selectedVal)}
+                    </select>
+                ` : ''}
+                ${isBeatRobot ? `
+                    <select id="beat-robot-speed-select"
+                            onclick="event.stopPropagation()"
+                            onchange="event.stopPropagation(); if (typeof onRobotSpeedChange === 'function') onRobotSpeedChange(this);"
+                            title="Choose robot speed"
+                            style="margin-left:auto; padding:3px 8px; border-radius:6px; border:1px solid #cbd5e1; font-size:12px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                        ${buildRobotOptions(normalizedSpeed)}
                     </select>
                 ` : ''}
             </div>
@@ -106,6 +153,7 @@ async function previewActiveAssignmentAsStudent() {
     currentStudentAssignment = {
         ...rawAssign,
         id: assignmentId,
+        beatRobotSpeed: normalizeRobotSpeedValue(rawAssign.beatRobotSpeed),
         listenTradGapLevel: gapMap['listen-trad'],
         listenDictationGapLevel: gapMap['listen-dictation'],
         delayedDictationGapLevel: gapMap['delayed-dictation'],
@@ -208,11 +256,16 @@ async function duplicateCurrentAssignmentToClass() {
         {id:'delayed-copying', label:'Delayed Copying'},
         {id:'listen-missing', label:'🎧 Missing Detail'},
         {id:'listen-faulty', label:'🎧 Faulty Translation'},
-        {id:'listen-jumbled', label:'🎧 Unjumble'}
+        {id:'listen-jumbled', label:'🎧 Unjumble'},
+        {id:'beat-robot', label:'🤖 Beat the Robot'}
     ];
 
     const savedGapLevels = getAssignmentGapLevelMap(assign);
-    document.getElementById('activity-list').innerHTML = renderTeacherActivityListRows(list, savedGapLevels);
+    const savedRobotSpeed = normalizeRobotSpeedValue(assign.beatRobotSpeed);
+    document.getElementById('activity-list').innerHTML = renderTeacherActivityListRows(list, savedGapLevels, savedRobotSpeed);
+
+    const speedSel = document.getElementById('beat-robot-speed-select');
+    if (speedSel) speedSel.value = savedRobotSpeed;
 
     document.getElementById('builder-title').value = assign.title || '';
     
@@ -297,7 +350,7 @@ async function downloadActiveAssignmentWorksheet() {
     let exerciseCounter = 1;
 
     selectedActs.forEach((type) => {
-        if (['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying', 'listen-missing', 'listen-faulty', 'listen-jumbled'].includes(type)) return;
+        if (['beat-robot', 'listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying', 'listen-missing', 'listen-faulty', 'listen-jumbled'].includes(type)) return;
 
         const isStudy = (type === 'study');
         const boxTitle = isStudy ? "Sentence Table" : ("Exercise " + exerciseCounter + ": " + getCleanActivityTitle(type, docLang));
@@ -697,6 +750,9 @@ async function renderStudentSubmissionsTable() {
             if (selActs.includes('listen-trad')) {
                 metaText += ` | Listen / Translate: ${formatGapLevelLabel(gapMap['listen-trad'])}`;
             }
+            if (selActs.includes('beat-robot')) {
+                metaText += ` | 🤖 Beat the Robot: ${formatRobotSpeedLabel(assign.beatRobotSpeed)}`;
+            }
             if (assign.dueDate) {
                 metaText += ` | Due: ${new Date(assign.dueDate).toLocaleString([], {dateStyle:'short', timeStyle:'short'})}`;
             }
@@ -794,11 +850,16 @@ async function editCurrentAssignment() {
         {id:'delayed-copying', label:'Delayed Copying'},
         {id:'listen-missing', label:'🎧 Missing Detail'},
         {id:'listen-faulty', label:'🎧 Faulty Translation'},
-        {id:'listen-jumbled', label:'🎧 Unjumble'}
+        {id:'listen-jumbled', label:'🎧 Unjumble'},
+        {id:'beat-robot', label:'🤖 Beat the Robot'}
     ];
 
     const savedGapLevels = getAssignmentGapLevelMap(assign);
-    document.getElementById('activity-list').innerHTML = renderTeacherActivityListRows(list, savedGapLevels);
+    const savedRobotSpeed = normalizeRobotSpeedValue(assign.beatRobotSpeed);
+    document.getElementById('activity-list').innerHTML = renderTeacherActivityListRows(list, savedGapLevels, savedRobotSpeed);
+
+    const speedSel = document.getElementById('beat-robot-speed-select');
+    if (speedSel) speedSel.value = savedRobotSpeed;
 
     document.getElementById('builder-title').value = assign.title || '';
     
