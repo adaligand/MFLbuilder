@@ -279,7 +279,7 @@ async function setupAssignmentBuilderContext(assign) {
 
 const allColors = ["#ffffff","#f1f5f9","#fee2e2","#ffedd5","#fef9c3","#dcfce7","#d1fae5","#e0f2fe","#e0e7ff","#ede9fe","#fae8ff","#fce7f3","#ffccd5","#bbf7d0"];
 
-const VOWELS_REGEX = /[aeiouàéèíóúüÄÖÜäöü]/i;
+const VOWELS_REGEX = /[aeiouáéíóúàèìòùâêîôûäëïöüÿ]/i;
 const CONSONANTS_REGEX = /[bcdfghjklmnpqrstvwxyzßçñ]/i;
 
 /* =========================
@@ -443,7 +443,11 @@ function setupVirtualKeyboard(lang, actType) {
     const bar = document.getElementById('virtual-keyboard-bar');
     if (!bar) return;
 
-    const noKeyboardActivities = ['match', 'nospaces', 'jumbled', 'study', 'gap-en', 'faulty', 'trans-en', 'listen-trad'];
+    const noKeyboardActivities = [
+        'match', 'nospaces', 'jumbled', 'study', 'gap-en',
+        'faulty', 'trans-en', 'listen-trad',
+        'listen-faulty', 'listen-missing', 'listen-jumbled'
+    ];
     if (noKeyboardActivities.includes(actType)) {
         bar.style.display = 'none';
         return;
@@ -469,6 +473,17 @@ function setupVirtualKeyboard(lang, actType) {
 
 function insertVirtualChar(char) {
     if (!activeInputForVK) return;
+
+    if (activeInputForVK.maxLength === 1) {
+        activeInputForVK.value = char;
+        activeInputForVK.focus();
+        if (typeof activeInputForVK.setSelectionRange === 'function') {
+            activeInputForVK.setSelectionRange(1, 1);
+        }
+        activeInputForVK.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+    }
+
     const start = activeInputForVK.selectionStart || 0;
     const end = activeInputForVK.selectionEnd || 0;
     const val = activeInputForVK.value;
@@ -664,7 +679,6 @@ function showPage(pageId) {
         renderLibrary();
     }
 
-    // --- ADD THESE 4 LINES HERE ---
     if (pageId !== 'student-portal-page') {
         clearStudentOneByOneTimers();
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
