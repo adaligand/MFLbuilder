@@ -215,7 +215,8 @@ function getCleanActivityTitle(type, lang) {
         'delayed-copying': 'Delayed Copying',
         'listen-missing': '🎧 Missing Detail',
         'listen-faulty': '🎧 Faulty Translation',
-        'listen-jumbled': '🎧 Unjumble Sentences'
+        'listen-jumbled': '🎧 Unjumble Sentences',
+        'beat-robot': '🤖 Beat the Robot'
     };
     return map[type] || type;
 }
@@ -286,9 +287,43 @@ function getActivityInstruction(type, lang) {
         'delayed-copying': dcInstruction,
         'listen-missing': `Listen to the audio and click the box where a ${lang} word has been removed.`,
         'listen-faulty': 'Listen to the audio and click on the wrong word in the English translation.',
-        'listen-jumbled': 'Listen to the audio and click the word chunks in order to form the sentence.'
+        'listen-jumbled': 'Listen to the audio and click the word chunks in order to form the sentence.',
+        'beat-robot': `Translate the English sentence into ${lang} before the robot finishes!`
     };
     return map[type] || 'Complete the exercise below.';
+}
+
+function getBeatRobotSpeedConfig() {
+    const raw = String(currentStudentAssignment?.beatRobotSpeed ?? 'normal').trim().toLowerCase();
+    const presets = {
+        'slow':      { key: 'slow',   label: 'Slow',   msPerChar: 280, headStartMs: 2500 },
+        'normal':    { key: 'normal', label: 'Normal', msPerChar: 185, headStartMs: 1800 },
+        'medium':    { key: 'normal', label: 'Normal', msPerChar: 185, headStartMs: 1800 },
+        'fast':      { key: 'fast',   label: 'Fast',   msPerChar: 125, headStartMs: 1200 },
+        'turbo':     { key: 'turbo',  label: 'Turbo',  msPerChar: 85,  headStartMs: 900 },
+        'very-fast': { key: 'turbo',  label: 'Turbo',  msPerChar: 85,  headStartMs: 900 }
+    };
+    if (presets[raw]) return presets[raw];
+
+    const num = parseFloat(raw);
+    if (!isNaN(num) && num > 0) {
+        if (num <= 4) {
+            return {
+                key: raw,
+                label: `${num}x`,
+                msPerChar: Math.round(185 / num),
+                headStartMs: Math.round(1800 / num)
+            };
+        }
+        return {
+            key: raw,
+            label: `${num}s`,
+            fixedDurationMs: Math.round(num * 1000),
+            msPerChar: 185,
+            headStartMs: 1000
+        };
+    }
+    return presets.normal;
 }
 
 async function loadStudentTask(assignmentId) {
@@ -408,7 +443,7 @@ async function loadStudentTask(assignmentId) {
                             if (!r || !r.studentAnswer) return false;
                             const ans = r.studentAnswer.trim();
                             if (ans === '' || ans === '(Empty)' || ans.startsWith('(Incomplete') || ans === '(Unmatched)') return false;
-                            if (['nospaces', 'jumbled', 'faulty', 'listen-missing', 'listen-faulty', 'listen-jumbled'].includes(act) && !r.isDone) return false;
+                            if (['nospaces', 'jumbled', 'faulty', 'listen-missing', 'listen-faulty', 'listen-jumbled', 'beat-robot'].includes(act) && !r.isDone) return false;
                             if ((act === 'vowels' || act === 'cons') && (!Array.isArray(r.letterValues) || r.letterValues.length === 0 || r.letterValues.some(v => !v.trim()))) return false;
                             if (STUDENT_MULTI_GAP_ACTIVITIES.includes(act) && Array.isArray(r.gapValues) && r.gapValues.length > 0 && r.gapValues.some(v => !v || !v.trim())) return false;
                             return true;
@@ -630,7 +665,7 @@ function isCurrentExerciseCompleted() {
         if (ans === '' || ans === '(Empty)' || ans.startsWith('(Incomplete') || ans === '(Unmatched)') {
             return false;
         }
-        if (['nospaces', 'jumbled', 'faulty', 'listen-missing', 'listen-faulty', 'listen-jumbled'].includes(actType) && !resp.isDone) {
+        if (['nospaces', 'jumbled', 'faulty', 'listen-missing', 'listen-faulty', 'listen-jumbled', 'beat-robot'].includes(actType) && !resp.isDone) {
             return false;
         }
         if ((actType === 'vowels' || actType === 'cons') &&
@@ -783,6 +818,9 @@ function checkOneByOneItemCompletion() {
     } else if (actType === 'listen-missing') {
         const block = area.querySelector('.student-item-block');
         isItemComplete = !!(block && block.dataset.missingSolved === 'true');
+    } else if (actType === 'beat-robot') {
+        const block = area.querySelector('.student-item-block');
+        isItemComplete = !!(block && block.dataset.robotDone === 'true');
     } else if (actType === 'nospaces') {
         const block = area.querySelector('.student-item-block');
         if (block) {
@@ -1422,6 +1460,68 @@ function renderCurrentStudentExercise() {
                 setTimeout(() => speakTL(targetText), 200);
             }
         }
+        else if (actType === 'beat-robot') {
+            const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
+            const isAlreadyDone = !!(savedResp && savedResp.isDone);
+            const didWin = !!(savedResp && savedResp.beatRobotWon);
+            const speedCfg = getBeatRobotSpeedConfig();
+            const restoredText = (savedResp && savedResp.studentAnswer && !savedResp.studentAnswer.startsWith('('))
+                ? savedResp.studentAnswer
+                : '';
+
+            cardContentHTML = `
+                <div class="student-item-block beat-robot-block"
+                    data-idx="${studentSubItemIndex}"
+                    data-correct="${targetText.replace(/"/g, '&quot;')}"
+                    data-robot-done="${isAlreadyDone ? 'true' : 'false'}"
+                    data-robot-won="${didWin ? 'true' : 'false'}"
+                    style="text-align:center; padding:10px 0;">
+                    <div style="display:flex; justify-content:center; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+                        <span style="font-size:24px; font-weight:bold; color:#0f172a;">${englishText}</span>
+                        <span style="background:#ede9fe; color:#5b21b6; border:1px solid #c4b5fd; font-size:12px; font-weight:700; padding:3px 10px; border-radius:999px;">
+                            🤖 Speed: ${speedCfg.label}
+                        </span>
+                    </div>
+
+                    <div id="beat-robot-track-wrap" style="max-width:540px; margin:0 auto 18px auto; background:#f8fafc; border:1px solid #cbd5e1; border-radius:10px; padding:10px 14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:700; color:#475569; margin-bottom:6px;">
+                            <span id="beat-robot-status-label">
+                                ${isAlreadyDone
+                                    ? (didWin ? '🏆 You finished before the robot!' : '🤖 Robot reached the finish line!')
+                                    : '🤖 Robot is racing...'}
+                            </span>
+                            <span id="beat-robot-pct-label">${isAlreadyDone ? (didWin ? 'Stopped' : '100%') : '0%'}</span>
+                        </div>
+                        <div style="position:relative; height:14px; background:#e2e8f0; border-radius:999px; overflow:hidden;">
+                            <div id="beat-robot-progress-fill" style="height:100%; width:${isAlreadyDone && !didWin ? '100%' : '0%'}; background:${isAlreadyDone ? (didWin ? '#10b981' : '#ef4444') : 'linear-gradient(90deg, #8b5cf6, #ec4899)'}; border-radius:999px; transition:width 0.08s linear;"></div>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; justify-content:center; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+                        <input type="text"
+                            id="beat-robot-input"
+                            class="full-typing-input"
+                            value="${restoredText.replace(/"/g, '&quot;')}"
+                            ${isAlreadyDone ? 'disabled' : ''}
+                            placeholder="Type ${docLang} translation before the robot finishes..."
+                            style="width:76%; max-width:460px; padding:10px 14px; border:2px solid ${isAlreadyDone ? (didWin ? '#10b981' : '#ef4444') : '#8b5cf6'}; border-radius:8px; font-size:20px; text-align:center; box-sizing:border-box;">
+                        ${!isAlreadyDone ? `
+                            <button type="button" id="beat-robot-check-btn" class="btn-purple" style="padding:10px 18px; font-size:15px; margin:0;">
+                                ⚡ Submit
+                            </button>
+                        ` : ''}
+                    </div>
+
+                    <div id="beat-robot-feedback" style="min-height:24px; font-weight:bold; font-size:15px; color:${isAlreadyDone ? (didWin ? '#10b981' : '#ef4444') : '#64748b'};">
+                        ${isAlreadyDone
+                            ? (didWin
+                                ? `✅ You beat the robot! (+1 pt)`
+                                : `Correct ${docLang}: <span style="color:#2563eb;">${targetText}</span>`)
+                            : ''}
+                    </div>
+                </div>
+            `;
+        }
         else { // trans-en, trans-target
             let promptText = '';
             let answerRef = '';
@@ -1623,6 +1723,12 @@ function renderCurrentStudentExercise() {
                         }
                     };
                 });
+            }
+        }
+        else if (actType === 'beat-robot') {
+            const block = area.querySelector('.beat-robot-block');
+            if (block && block.dataset.robotDone !== 'true' && !(isAlreadySubmitted && !window.isTeacherPreview)) {
+                runStudentBeatTheRobot(targetText, studentSubItemIndex);
             }
         }
 
@@ -1876,6 +1982,127 @@ function runStudentDelayedCopying(targetText, itemIdx) {
         }
     }, 1000);
     studentOneByOneTimers.push(timer1);
+}
+
+function runStudentBeatTheRobot(targetText, itemIdx) {
+    clearStudentOneByOneTimers();
+
+    const area = document.getElementById('exercise-interactive-area');
+    const block = area ? area.querySelector('.beat-robot-block') : null;
+    const input = document.getElementById('beat-robot-input');
+    const checkBtn = document.getElementById('beat-robot-check-btn');
+    const fillEl = document.getElementById('beat-robot-progress-fill');
+    const statusEl = document.getElementById('beat-robot-status-label');
+    const pctEl = document.getElementById('beat-robot-pct-label');
+    const feedbackEl = document.getElementById('beat-robot-feedback');
+
+    if (!block || !input) return;
+
+    const speedCfg = getBeatRobotSpeedConfig();
+    const charCount = Math.max(4, (targetText || '').trim().length);
+    const totalDurationMs = speedCfg.fixedDurationMs
+        || (speedCfg.headStartMs + charCount * speedCfg.msPerChar);
+
+    const startTime = performance.now();
+    let settled = false;
+
+    const finishRound = (reason) => {
+        if (settled) return;
+        settled = true;
+        clearStudentOneByOneTimers();
+
+        const elapsedMs = Math.round(performance.now() - startTime);
+        const typedVal = input.value.trim();
+        const evalRes = evaluateTextSimilarity(typedVal, targetText);
+        const isExact = (evalRes.points === 1);
+        const studentWon = (reason !== 'timeout') && isExact;
+
+        block.dataset.robotDone = 'true';
+        block.dataset.robotWon = studentWon ? 'true' : 'false';
+        block.dataset.elapsedMs = String(elapsedMs);
+
+        input.disabled = true;
+        if (checkBtn) checkBtn.style.display = 'none';
+
+        if (studentWon) {
+            input.style.borderColor = '#10b981';
+            input.style.background = '#ecfdf5';
+            if (fillEl) fillEl.style.background = '#10b981';
+            if (statusEl) statusEl.innerText = '🏆 You finished before the robot!';
+            if (pctEl) pctEl.innerText = 'Stopped';
+            if (feedbackEl) {
+                feedbackEl.style.color = '#10b981';
+                feedbackEl.innerHTML = `✅ You beat the robot in ${(elapsedMs / 1000).toFixed(1)}s! (+1 pt)`;
+            }
+            if (typeof speakTL === 'function') speakTL(targetText);
+        } else {
+            input.style.borderColor = evalRes.points > 0 ? '#f59e0b' : '#ef4444';
+            input.style.background = evalRes.points > 0 ? '#fffbeb' : '#fef2f2';
+            if (fillEl) {
+                fillEl.style.width = '100%';
+                fillEl.style.background = '#ef4444';
+            }
+            if (pctEl) pctEl.innerText = '100%';
+            if (statusEl) {
+                statusEl.innerText = (reason === 'timeout')
+                    ? '🤖 The robot finished first!'
+                    : '🤖 Not quite — robot wins this round!';
+            }
+            if (feedbackEl) {
+                feedbackEl.style.color = evalRes.points > 0 ? '#d97706' : '#ef4444';
+                const partialNote = evalRes.points > 0 ? ' (Partial credit: +0.5 pt)' : '';
+                feedbackEl.innerHTML = `${reason === 'timeout' ? '⏱️ Time up!' : '❌ Incorrect.'}${partialNote} Correct answer: <span style="color:#2563eb;">${targetText}</span>`;
+            }
+        }
+
+        saveStudentCurrentExerciseResponses();
+        checkOneByOneItemCompletion();
+        checkExerciseCompletion();
+    };
+
+    input.onfocus = function() {
+        activeInputForVK = this;
+    };
+    input.oninput = function() {
+        if (settled) return;
+        if (normalizeString(this.value) === normalizeString(targetText)) {
+            finishRound('exact');
+            return;
+        }
+        saveStudentCurrentExerciseResponses();
+    };
+    input.onkeydown = function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (!settled) {
+                finishRound('submit');
+            } else {
+                const submitBtn = document.getElementById('one-by-one-submit-btn');
+                if (submitBtn && submitBtn.style.display !== 'none') submitBtn.click();
+            }
+        }
+    };
+    if (checkBtn) {
+        checkBtn.onclick = () => finishRound('submit');
+    }
+
+    const tick = (now) => {
+        if (settled || !document.body.contains(block)) return;
+        const elapsed = now - startTime;
+        const progress = Math.min(1, elapsed / totalDurationMs);
+        const pct = Math.round(progress * 100);
+
+        if (fillEl) fillEl.style.width = `${pct}%`;
+        if (pctEl) pctEl.innerText = `${pct}%`;
+
+        if (progress >= 1) {
+            finishRound('timeout');
+        } else {
+            beatRobotRafId = requestAnimationFrame(tick);
+        }
+    };
+
+    beatRobotRafId = requestAnimationFrame(tick);
 }
 
 /* =========================
@@ -2359,6 +2586,35 @@ function saveStudentCurrentExerciseResponses() {
                 isDone: isDone,
                 removedWord: removedWord,
                 removedIdx: removedIdx
+            };
+        }
+    }
+    // --- BEAT THE ROBOT ---
+    else if (actType === 'beat-robot') {
+        const block = area.querySelector('.beat-robot-block');
+        const s = sents[studentSubItemIndex];
+        if (block && s) {
+            const input = document.getElementById('beat-robot-input');
+            const ans = input ? input.value.trim() : '';
+            const correct = (s.t || '').trim();
+            const isDone = (block.dataset.robotDone === 'true');
+            const beatRobotWon = (block.dataset.robotWon === 'true');
+            const elapsedMs = parseInt(block.dataset.elapsedMs || '0', 10);
+
+            const evalResult = evaluateTextSimilarity(ans, correct);
+            const points = isDone
+                ? (beatRobotWon ? 1.0 : (evalResult.points === 0.5 ? 0.5 : 0.0))
+                : 0.0;
+
+            responses[studentSubItemIndex] = {
+                prompt: cleanEnglishText(s.tr || ''),
+                studentAnswer: ans || (isDone ? '(Timed out - Robot won)' : '(Empty)'),
+                correctAnswer: correct || '(No markscheme translation set)',
+                isCorrect: points === 1.0,
+                points: points,
+                isDone: isDone,
+                beatRobotWon: beatRobotWon,
+                elapsedMs: elapsedMs
             };
         }
     }
