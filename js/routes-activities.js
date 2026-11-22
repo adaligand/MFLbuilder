@@ -3,6 +3,7 @@
 ========================= */
 const MULTI_GAP_ACTIVITY_IDS = ['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'];
 const BEAT_ROBOT_ACTIVITY_ID = 'beat-robot';
+const ROBOT_SPEED_ACTIVITY_ID = BEAT_ROBOT_ACTIVITY_ID;
 
 function getBeatRobotModeOptionsHTML(selectedMode = 'vowels') {
     const normalized = ['vowels', 'consonants'].includes(String(selectedMode).toLowerCase())
@@ -15,6 +16,10 @@ function getBeatRobotModeOptionsHTML(selectedMode = 'vowels') {
     return options
         .map(o => `<option value="${o.val}" ${o.val === normalized ? 'selected' : ''}>${o.label}</option>`)
         .join('');
+}
+
+function getRobotSpeedOptionsHTML(selectedMode = 'vowels') {
+    return getBeatRobotModeOptionsHTML(selectedMode);
 }
 
 function onBeatRobotModeChange(selectEl) {
@@ -31,6 +36,11 @@ function onBeatRobotModeChange(selectEl) {
     }
     updateAssignmentTimeEstimate();
 }
+
+function onRobotSpeedChange(selectEl) {
+    onBeatRobotModeChange(selectEl);
+}
+
 const AUDIO_ACTIVITY_IDS = [
     'listen-trad',
     'listen-dictation',
@@ -96,7 +106,7 @@ function resolveActivityGapLevelFromArg(actId, gapLevelsOrSingle = '1') {
 }
 
 function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle = 'flex: 0 0 auto !important; height: auto !important; min-height: 0 !important; padding: 6px 6px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 6px;') {
-   const isMultiGap = MULTI_GAP_ACTIVITY_IDS.includes(a.id);
+    const isMultiGap = MULTI_GAP_ACTIVITY_IDS.includes(a.id);
     const isBeatRobot = (a.id === BEAT_ROBOT_ACTIVITY_ID);
     const selectedLevel = resolveActivityGapLevelFromArg(a.id, gapLevelsOrSingle);
     const selectedRobotMode = (gapLevelsOrSingle && typeof gapLevelsOrSingle === 'object' && gapLevelsOrSingle['beat-robot'])
@@ -109,7 +119,7 @@ function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle 
                 onclick="event.stopPropagation()"
                 onchange="event.stopPropagation(); onActivityGapLevelChange('${a.id}', this)"
                 title="Choose how many words are removed in ${a.label}"
-                style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer; pointer-events:auto !important;">
                 ${getActivityGapOptionsHTML(selectedLevel)}
            </select>`;
     } else if (isBeatRobot) {
@@ -117,15 +127,15 @@ function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle 
                 onclick="event.stopPropagation()"
                 onchange="event.stopPropagation(); onBeatRobotModeChange(this)"
                 title="Choose whether vowels or consonants are removed in ${a.label}"
-                style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer; pointer-events:auto !important;">
                 ${getBeatRobotModeOptionsHTML(selectedRobotMode)}
            </select>`;
     }
 
     return `
-        <div class="activity-row" style="${extraRowStyle}">
-            <input type="checkbox" value="${a.id}" id="chk-${a.id}" style="flex-shrink:0;" onchange="renderPerActivitySentenceBoxes()">
-            <label for="chk-${a.id}" style="cursor:pointer; font-weight:500; font-size: 13px; line-height: 1.25; white-space: nowrap;">${a.label}</label>
+        <div class="activity-row" onclick="if(event.target === this){ const cb = this.querySelector('input[type=checkbox]'); if(cb){ cb.checked = !cb.checked; renderPerActivitySentenceBoxes(); } }" style="${extraRowStyle} cursor:pointer; pointer-events:auto !important;">
+            <input type="checkbox" value="${a.id}" id="chk-${a.id}" style="width:16px !important; height:16px !important; min-width:16px !important; margin:0 !important; flex-shrink:0 !important; cursor:pointer !important; pointer-events:auto !important; position:relative !important; z-index:2 !important; accent-color:#2563eb;" onchange="renderPerActivitySentenceBoxes()">
+            <label for="chk-${a.id}" style="cursor:pointer !important; pointer-events:auto !important; font-weight:500; font-size: 13px; line-height: 1.25; white-space: nowrap; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; margin:0;">${a.label}</label>
             ${dropdownHTML}
         </div>
     `;
@@ -174,12 +184,25 @@ function applyActivityListLayoutOverrides() {
     });
 
     container.querySelectorAll('.activity-row').forEach(row => {
+        row.style.setProperty('pointer-events', 'auto', 'important');
         const cb = row.querySelector('input[type="checkbox"]');
-        if (cb) cb.style.flexShrink = '0';
+        if (cb) {
+            cb.style.setProperty('width', '16px', 'important');
+            cb.style.setProperty('height', '16px', 'important');
+            cb.style.setProperty('min-width', '16px', 'important');
+            cb.style.setProperty('margin', '0', 'important');
+            cb.style.setProperty('flex-shrink', '0', 'important');
+            cb.style.setProperty('cursor', 'pointer', 'important');
+            cb.style.setProperty('pointer-events', 'auto', 'important');
+            cb.style.setProperty('position', 'relative', 'important');
+            cb.style.setProperty('z-index', '2', 'important');
+        }
         const lbl = row.querySelector('label');
         if (lbl) {
             lbl.style.whiteSpace = 'nowrap';
             lbl.style.fontSize = '13px';
+            lbl.style.setProperty('cursor', 'pointer', 'important');
+            lbl.style.setProperty('pointer-events', 'auto', 'important');
         }
         const sel = row.querySelector('select');
         if (sel) {
@@ -187,6 +210,7 @@ function applyActivityListLayoutOverrides() {
             sel.style.maxWidth = '112px';
             sel.style.padding = '2px 5px';
             sel.style.fontSize = '11px';
+            sel.style.setProperty('pointer-events', 'auto', 'important');
         }
     });
 }
@@ -562,12 +586,14 @@ function estimateSingleSentenceSeconds(actId, sentenceObj) {
         case 'cons':
             // Reconstructing every word from partial letter skeleton + recalling accents/endings
             return 7.0 + (chars * 0.65);
-case 'beat-robot': {
-    const mode = document.getElementById('beat-robot-mode-select')?.value || 'vowels';
-    const ratio = mode === 'consonants' ? 0.58 : 0.42;
-    const approxMissingLetters = Math.max(2, Math.round(chars * ratio));
-    return 4.5 + (approxMissingLetters * 1.5);
-}
+
+        case 'beat-robot': {
+            const mode = document.getElementById('beat-robot-mode-select')?.value || 'vowels';
+            const ratio = mode === 'consonants' ? 0.58 : 0.42;
+            const approxMissingLetters = Math.max(2, Math.round(chars * ratio));
+            return 4.5 + (approxMissingLetters * 1.5);
+        }
+
         case 'listen-trad': {
             const { count, pct } = getGapStats(actId);
             // More missing English words = more replays & longer translation recall
@@ -1005,7 +1031,7 @@ function openActivityMenu() {
         {id:'gap-t', label:`Gap Fill (${currentLang})`}, 
         {id:'vowels', label:'Missing Vowels'}, 
         {id:'cons', label:'Missing Consonants'}, 
-       {id:'beat-robot', label:'🤖 Beat the Robot'},
+        {id:'beat-robot', label:'🤖 Beat the Robot'},
         {id:'faulty', label:'Faulty Translation'}, 
         {id:'trans-en', label:'Translate (English)'}, 
         {id:'trans-target', label:`Translate (${currentLang})`},
@@ -1019,12 +1045,12 @@ function openActivityMenu() {
     ];
 
     const defaultGapLevels = {
-    'listen-trad': '1',
-    'listen-dictation': '1',
-    'delayed-dictation': '1',
-    'delayed-copying': '1',
-    'beat-robot': 'vowels'
-};
+        'listen-trad': '1',
+        'listen-dictation': '1',
+        'delayed-dictation': '1',
+        'delayed-copying': '1',
+        'beat-robot': 'vowels'
+    };
 
     const textActivities = list.filter(a => !AUDIO_ACTIVITY_IDS.includes(a.id));
     const audioActivities = list.filter(a => AUDIO_ACTIVITY_IDS.includes(a.id));
@@ -1932,7 +1958,7 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null, preserveCat
         container.dataset.timeEstimateBound = 'true';
     }
 
-      // Preserve currently expanded exercise cards across re-renders
+    // Preserve currently expanded exercise cards across re-renders
     const expandedActivityIds = new Set();
     if (container) {
         container.querySelectorAll('.act-card-body').forEach(bodyEl => {
@@ -2056,11 +2082,11 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null, preserveCat
             const badgeId = actId === 'delayed-copying' ? 'dc-card-gap-badge' : `${actId}-card-gap-badge`;
             gapBadgeHTML = `<span id="${badgeId}" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${gapLabel} removed)</span>`;
         }
-if (actId === 'beat-robot') {
-    const modeSelect = document.getElementById('beat-robot-mode-select');
-    const modeLabel = modeSelect ? (modeSelect.options[modeSelect.selectedIndex]?.text || 'Vowels') : 'Vowels';
-    gapBadgeHTML = `<span id="beat-robot-card-mode-badge" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${modeLabel} removed)</span>`;
-}
+        if (actId === 'beat-robot') {
+            const modeSelect = document.getElementById('beat-robot-mode-select');
+            const modeLabel = modeSelect ? (modeSelect.options[modeSelect.selectedIndex]?.text || 'Vowels') : 'Vowels';
+            gapBadgeHTML = `<span id="beat-robot-card-mode-badge" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${modeLabel} removed)</span>`;
+        }
         const isExpanded = expandedActivityIds.has(actId);
 
         html += `
@@ -2513,10 +2539,10 @@ async function publishTaskToClassroom() {
     const delayedCopyingGapLevel = selectedActivities.includes('delayed-copying')
         ? (document.getElementById('delayed-copying-gap-select')?.value || '1')
         : '1';
-const beatRobotMode = selectedActivities.includes('beat-robot')
-    ? (document.getElementById('beat-robot-mode-select')?.value || 'vowels')
-    : 'vowels';
-const beatRobotSpeed = '1500';
+    const beatRobotMode = selectedActivities.includes('beat-robot')
+        ? (document.getElementById('beat-robot-mode-select')?.value || 'vowels')
+        : 'vowels';
+    const beatRobotSpeed = '1500';
     const activityGapLevels = {
         'listen-trad': listenTradGapLevel,
         'listen-dictation': listenDictationGapLevel,
@@ -2606,7 +2632,7 @@ const beatRobotSpeed = '1500';
             const assignDoc = await db.collection("assignments").doc(editingAssignmentId).get();
             const existingData = assignDoc.data();
 
-          const updatePayload = {
+            const updatePayload = {
                 title: title,
                 builderId: targetBuilderId,
                 builderSnapshot: builderSnapshot,
@@ -2616,6 +2642,7 @@ const beatRobotSpeed = '1500';
                 delayedDictationGapLevel: delayedDictationGapLevel,
                 delayedCopyingGapLevel: delayedCopyingGapLevel,
                 activityGapLevels: activityGapLevels,
+                beatRobotMode: beatRobotMode,
                 beatRobotSpeed: beatRobotSpeed,
                 sentencesPerActivity: structuredSentencesPerActivity,
                 maxPoints: maxPoints > 0 ? maxPoints : 10,
@@ -2715,6 +2742,7 @@ const beatRobotSpeed = '1500';
         delayedDictationGapLevel: delayedDictationGapLevel,
         delayedCopyingGapLevel: delayedCopyingGapLevel,
         activityGapLevels: activityGapLevels,
+        beatRobotMode: beatRobotMode,
         beatRobotSpeed: beatRobotSpeed,
         sentencesPerActivity: structuredSentencesPerActivity,
         maxPoints: maxPoints > 0 ? maxPoints : 10,
