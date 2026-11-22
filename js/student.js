@@ -28,14 +28,12 @@ function formatStudentDuration(totalSeconds) {
     const hours = Math.floor(rounded / 3600);
     const mins = Math.floor((rounded % 3600) / 60);
     const secs = rounded % 60;
+    const paddedSecs = String(secs).padStart(2, '0');
 
     if (hours > 0) {
-        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+        return `${hours}h ${String(mins).padStart(2, '0')}m ${paddedSecs}s`;
     }
-    if (mins > 0) {
-        return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
-    }
-    return `${secs}s`;
+    return `${mins}m ${paddedSecs}s`;
 }
 
 function flushStudentTimeDelta() {
