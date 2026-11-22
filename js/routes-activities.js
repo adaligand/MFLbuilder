@@ -1825,6 +1825,10 @@ function refreshActivitySentences(actId, e) {
     if (e) e.stopPropagation();
 
     const currentMap = getCurrentSentencesMapFromDOM();
+    const previousSents = currentMap[actId] || window.editingSavedSentencesMap?.[actId] || [];
+    const previousTexts = new Set(
+        previousSents.map(s => (s.t || '').replace(/\*/g, '').trim()).filter(Boolean)
+    );
 
     const rawLimit = parseInt(document.getElementById('sentence-count')?.value, 10);
     const limit = (!isNaN(rawLimit) && rawLimit > 0) ? rawLimit : 10;
@@ -1835,13 +1839,31 @@ function refreshActivitySentences(actId, e) {
         availablePool = availablePool.filter(isEligibleForFaulty);
     }
 
-    currentMap[actId] = getBalancedSelection(availablePool, limit);
+    // Prefer sentences not currently shown for this activity so Refresh produces a fresh set
+    const freshPool = availablePool.filter(
+        s => !previousTexts.has((s.t || '').replace(/\*/g, '').trim())
+    );
 
-    window.editingSavedSentencesMap = {
+    let nextSents = [];
+    if (freshPool.length >= limit) {
+        nextSents = getBalancedSelection(freshPool, limit);
+    } else if (freshPool.length > 0) {
+        const freshBatch = getBalancedSelection(freshPool, freshPool.length);
+        const usedInBatch = new Set(freshBatch.map(s => (s.t || '').trim()));
+        const remainderPool = availablePool.filter(s => !usedInBatch.has((s.t || '').trim()));
+        nextSents = freshBatch.concat(getBalancedSelection(remainderPool, limit - freshBatch.length));
+    } else {
+        nextSents = getBalancedSelection(availablePool, limit);
+    }
+
+    const updatedMap = {
         ...(window.editingSavedSentencesMap || {}),
-        ...currentMap
+        ...currentMap,
+        [actId]: nextSents
     };
-    renderPerActivitySentenceBoxes();
+
+    window.editingSavedSentencesMap = updatedMap;
+    renderPerActivitySentenceBoxes(updatedMap);
 
     const body = document.getElementById(`act-body-${actId}`);
     const arrow = document.getElementById(`arrow-${actId}`);
