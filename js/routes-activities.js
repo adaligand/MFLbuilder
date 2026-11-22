@@ -1019,8 +1019,10 @@ function openActivityMenu() {
     const btn = document.getElementById('gc-publish-btn');
     if (btn) btn.innerText = "📢 Publish Assignment Now";
     
-    document.getElementById('gc-due-date').value = "";
-    document.getElementById('gc-schedule-date').value = "";
+    const dueInput = document.getElementById('gc-due-date');
+    const schedInput = document.getElementById('gc-schedule-date');
+    if (dueInput) dueInput.value = "";
+    if (schedInput) schedInput.value = "";
 
     const currentLang = meta.lang || document.getElementById('meta-lang')?.value || "Target Language";
     const list = [
@@ -1035,7 +1037,7 @@ function openActivityMenu() {
         {id:'faulty', label:'Faulty Translation'}, 
         {id:'trans-en', label:'Translate (English)'}, 
         {id:'trans-target', label:`Translate (${currentLang})`},
-        {id:'listen-trad', label:'🎧 Translatation'},
+        {id:'listen-trad', label:'🎧 Translation'},
         {id:'listen-dictation', label:'🎧 Dictation'},
         {id:'delayed-dictation', label:'🎧 Delayed Dictation'},
         {id:'delayed-copying', label:'Delayed Copying'},
@@ -1219,7 +1221,7 @@ function getAssembledSentences(customGridContext = null) {
             let cell = targetGrid[r][0];
             let rSpan = cell.rS || 1;
             for (let subR = r; subR < r + rSpan; subR++) {
-                let paths = findPaths(r, 0, subR, ctx, memo);
+                let paths = findPaths(r, 0, subR, ctx, memo).filter(p => isPathValid(p.parts, ctx, true));
                 paths.forEach(p => { p.originRow = subR; });
                 allSentences = allSentences.concat(paths);
             }
@@ -1252,7 +1254,7 @@ function getAssembledSentences(customGridContext = null) {
 /* =========================
    PATH VALIDATION ENGINE
 ========================= */
-function isPathValid(partsMeta, ctx = null) {
+function isPathValid(partsMeta, ctx = null, isCompletePath = true) {
     if (!partsMeta || partsMeta.length === 0) return true;
 
     const dRoutes = (ctx && ctx.disabledRoutes !== undefined) ? ctx.disabledRoutes : (activeAssignmentDisabledRoutes !== null ? activeAssignmentDisabledRoutes : disabledRoutes);
@@ -1260,10 +1262,7 @@ function isPathValid(partsMeta, ctx = null) {
     const exPairs = (ctx && ctx.excludedPairs !== undefined) ? ctx.excludedPairs : (activeAssignmentExcludedPairs !== null ? activeAssignmentExcludedPairs : excludedPairs);
     const reqCombos = (ctx && ctx.requiredCombos !== undefined) ? ctx.requiredCombos : (activeAssignmentRequiredCombos !== null ? activeAssignmentRequiredCombos : requiredCombos);
 
-    const contentParts = partsMeta.filter(p => !p.isBridge);
-    const routeKey = contentParts.map(p => `${p.r + 1}.${p.c + 1}`).join('+');
-    if (dRoutes && dRoutes.includes(routeKey)) return false;
-
+    // Excluded combos & pairs can safely prune partial paths early
     if (exCombos && exCombos.length > 0) {
         for (let combo of exCombos) {
             const cells = combo.cells || combo;
@@ -1279,12 +1278,19 @@ function isPathValid(partsMeta, ctx = null) {
         }
     }
 
-    if (reqCombos && reqCombos.length > 0) {
-        for (let combo of reqCombos) {
-            const cellA = combo.cellA || combo.a;
-            const cellB = combo.cellB || combo.b;
-            if (cellA && cellB) {
-                if (partsMeta.some(p => p.r === cellA.r && p.c === cellA.c) && !partsMeta.some(p => p.r === cellB.r && p.c === cellB.c)) return false;
+    // Disabled routes and required combos depend on the full assembled path from column 0 to end
+    if (isCompletePath) {
+        const contentParts = partsMeta.filter(p => !p.isBridge);
+        const routeKey = contentParts.map(p => `${p.r + 1}.${p.c + 1}`).join('+');
+        if (dRoutes && dRoutes.includes(routeKey)) return false;
+
+        if (reqCombos && reqCombos.length > 0) {
+            for (let combo of reqCombos) {
+                const cellA = combo.cellA || combo.a;
+                const cellB = combo.cellB || combo.b;
+                if (cellA && cellB) {
+                    if (partsMeta.some(p => p.r === cellA.r && p.c === cellA.c) && !partsMeta.some(p => p.r === cellB.r && p.c === cellB.c)) return false;
+                }
             }
         }
     }
@@ -1332,7 +1338,7 @@ function findPaths(r, c, activeRow = null, customCtx = null, memo = null) {
         }));
 
     if (nextCol >= targetGrid[0].length) {
-        const leafRes = currentOptions.filter(path => isPathValid(path.parts, customCtx));
+        const leafRes = currentOptions.filter(path => isPathValid(path.parts, customCtx, false));
         if (memo) memo.set(cacheKey, leafRes);
         return leafRes;
     }
@@ -1370,9 +1376,9 @@ function findPaths(r, c, activeRow = null, customCtx = null, memo = null) {
             details: sp.details || []
         }));
     } else if (currentOptions.length === 0) {
-        result = combinedSubPaths.filter(p => isPathValid(p.parts, customCtx));
+        result = combinedSubPaths.filter(p => isPathValid(p.parts, customCtx, false));
     } else if (combinedSubPaths.length === 0) {
-        result = currentOptions.filter(p => isPathValid(p.parts, customCtx));
+        result = currentOptions.filter(p => isPathValid(p.parts, customCtx, false));
     } else {
         result = [];
         for (let i = 0; i < currentOptions.length; i++) {
@@ -1380,7 +1386,7 @@ function findPaths(r, c, activeRow = null, customCtx = null, memo = null) {
             for (let j = 0; j < combinedSubPaths.length; j++) {
                 const sub = combinedSubPaths[j];
                 const combinedParts = [...curr.parts, ...sub.parts];
-                if (isPathValid(combinedParts, customCtx)) {
+                if (isPathValid(combinedParts, customCtx, false)) {
                     result.push({
                         t: curr.t + " " + sub.t,
                         tr: curr.tr ? (sub.tr ? curr.tr + " " + sub.tr : curr.tr) : sub.tr,
@@ -1582,7 +1588,7 @@ function getAllRawRoutes() {
         excludedCombos: excludedCombos || [],
         requiredCombos: requiredCombos || [],
         excludedPairs: excludedPairs || [],
-        transformationsText: document.getElementById('transformations-input')?.value || transformationsText || ""
+        transformationsText: ""
     };
 
     const allPaths = getAssembledSentences(routeCtx);
@@ -2155,7 +2161,7 @@ function addAsteriskToGapWord(sentenceStr, usedGapWords) {
     const candidates = [];
 
     tokens.forEach((tok, idx) => {
-        const clean = tok.replace(/[.,!?;:'"«»()]/g, '').trim();
+        const clean = tok.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').trim();
         if (clean.length >= 2 && !usedGapWords.has(clean.toLowerCase())) {
             candidates.push({ idx, clean, cleanLower: clean.toLowerCase(), orig: tok });
         }
@@ -2164,7 +2170,7 @@ function addAsteriskToGapWord(sentenceStr, usedGapWords) {
     let chosen = candidates.length > 0 ? candidates[Math.floor(Math.random() * candidates.length)] : null;
     if (!chosen) {
         tokens.forEach((tok, idx) => {
-            const clean = tok.replace(/[.,!?;:'"«»()]/g, '').trim();
+            const clean = tok.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').trim();
             if (clean.length >= 2) chosen = { idx, clean, cleanLower: clean.toLowerCase(), orig: tok };
         });
     }
@@ -2317,7 +2323,7 @@ function generateWorksheet() {
                 var answerText = s.t; 
                 
                 if (type === 'vowels' || type === 'cons') {
-                    var pattern = (type === 'vowels') ? /[aeiouàéèíóúü]/gi : /[bcdfghjklmnpqrstvwxyz]/gi;
+                    var pattern = (type === 'vowels') ? /[aeiouáéíóúàèìòùâêîôûäëïöüÿ]/gi : /[bcdfghjklmnpqrstvwxyzßçñ]/gi;
                     out = s.t.split(' ').map(function(word) { return word.replace(pattern, ' __ '); }).join('&nbsp;&nbsp;');
                 }
                 else if (type === 'nospaces') {
@@ -2508,6 +2514,7 @@ async function loadCourseTopics(courseId) {
         const res = await gapi.client.classroom.courses.topics.list({ courseId: courseId });
         const topics = res.result.topic || [];
         const select = document.getElementById('gc-topic-select');
+        if (!select) return;
         select.innerHTML = '<option value="">-- No Topic --</option>' + 
             topics.map(t => `<option value="${t.topicId}">${t.name}</option>`).join('');
     } catch (e) {
@@ -2517,8 +2524,8 @@ async function loadCourseTopics(courseId) {
 
 async function publishTaskToClassroom() {
     const courseSelect = document.getElementById('gc-course-select');
-    const courseId = courseSelect.value;
-    const courseName = courseSelect.options[courseSelect.selectedIndex]?.text || '';
+    const courseId = courseSelect?.value;
+    const courseName = courseSelect?.options?.[courseSelect.selectedIndex]?.text || '';
 
     if (!courseId) return alert("Select a Google Classroom course.");
 
@@ -2587,7 +2594,7 @@ async function publishTaskToClassroom() {
             structuredSentencesPerActivity[actId] = window.editingSavedSentencesMap[actId];
             totalSentencesCount += window.editingSavedSentencesMap[actId].length;
         } else {
-            const exerciseLimit = parseInt(document.getElementById('sentence-count').value, 10);
+            const exerciseLimit = parseInt(document.getElementById('sentence-count')?.value, 10) || 10;
             const pool = (actId === 'faulty' || actId === 'listen-faulty')
                 ? allSentences.filter(isEligibleForFaulty)
                 : allSentences;
@@ -2596,11 +2603,11 @@ async function publishTaskToClassroom() {
         }
     });
 
-    const title = document.getElementById('builder-title').value || "Sentence Practice";
+    const title = document.getElementById('builder-title')?.value || "Sentence Practice";
     const maxPoints = totalSentencesCount * 1;
-    const dueDateVal = document.getElementById('gc-due-date').value;
-    const scheduleDateVal = document.getElementById('gc-schedule-date').value;
-    const topicId = document.getElementById('gc-topic-select').value;
+    const dueDateVal = document.getElementById('gc-due-date')?.value || "";
+    const scheduleDateVal = document.getElementById('gc-schedule-date')?.value || "";
+    const topicId = document.getElementById('gc-topic-select')?.value || "";
 
     let gcDueDate = null, gcDueTime = null;
     if (dueDateVal) {
@@ -2693,67 +2700,72 @@ async function publishTaskToClassroom() {
         }
     }
 
-    const assignmentRef = db.collection("assignments").doc();
-    const assignmentId = assignmentRef.id;
-    const studentUrl = `${window.location.origin}${window.location.pathname}?assignmentId=${assignmentId}`;
+    try {
+        const assignmentRef = db.collection("assignments").doc();
+        const assignmentId = assignmentRef.id;
+        const studentUrl = `${window.location.origin}${window.location.pathname}?assignmentId=${assignmentId}`;
 
-    const cwPayload = {
-        title: `🧩 ${title}`,
-        description: `Use the link below to complete the interactive tasks. Make sure to log in using your school Google account`,
-        workType: 'ASSIGNMENT',
-        maxPoints: maxPoints > 0 ? maxPoints : 10,
-        materials: [{ link: { url: studentUrl, title: "Interactive Sentence Task" } }]
-    };
+        const cwPayload = {
+            title: `🧩 ${title}`,
+            description: `Use the link below to complete the interactive tasks. Make sure to log in using your school Google account`,
+            workType: 'ASSIGNMENT',
+            maxPoints: maxPoints > 0 ? maxPoints : 10,
+            materials: [{ link: { url: studentUrl, title: "Interactive Sentence Task" } }]
+        };
 
-    if (gcDueDate && gcDueTime) {
-        cwPayload.dueDate = gcDueDate;
-        cwPayload.dueTime = gcDueTime;
-    }
+        if (gcDueDate && gcDueTime) {
+            cwPayload.dueDate = gcDueDate;
+            cwPayload.dueTime = gcDueTime;
+        }
 
-    if (topicId) cwPayload.topicId = topicId;
+        if (topicId) cwPayload.topicId = topicId;
 
-    if (gcScheduledTime) {
-        cwPayload.scheduledTime = gcScheduledTime;
-        cwPayload.state = 'DRAFT';
-    } else {
-        cwPayload.state = 'PUBLISHED';
-    }
+        if (gcScheduledTime) {
+            cwPayload.scheduledTime = gcScheduledTime;
+            cwPayload.state = 'DRAFT';
+        } else {
+            cwPayload.state = 'PUBLISHED';
+        }
 
-    const res = await gapi.client.classroom.courses.courseWork.create({ courseId: courseId, resource: cwPayload });
+        const res = await gapi.client.classroom.courses.courseWork.create({ courseId: courseId, resource: cwPayload });
 
-    if (!gcScheduledTime) {
-        await gapi.client.classroom.courses.courseWork.patch({
-            courseId: courseId, id: res.result.id, updateMask: "state", resource: { state: 'PUBLISHED' }
+        if (!gcScheduledTime) {
+            await gapi.client.classroom.courses.courseWork.patch({
+                courseId: courseId, id: res.result.id, updateMask: "state", resource: { state: 'PUBLISHED' }
+            });
+        }
+
+        await assignmentRef.set({
+            id: assignmentId,
+            builderId: targetBuilderId,
+            builderSnapshot: builderSnapshot,
+            gClassroomAssignmentId: res.result.id,
+            courseId: courseId,
+            courseName: courseName,
+            title: title,
+            lang: window.duplicatingAssignmentLang || document.getElementById('meta-lang')?.value || meta.lang || "French",
+            selectedActivities: selectedActivities,
+            listenTradGapLevel: listenTradGapLevel,
+            listenDictationGapLevel: listenDictationGapLevel,
+            delayedDictationGapLevel: delayedDictationGapLevel,
+            delayedCopyingGapLevel: delayedCopyingGapLevel,
+            activityGapLevels: activityGapLevels,
+            beatRobotMode: beatRobotMode,
+            beatRobotSpeed: beatRobotSpeed,
+            sentencesPerActivity: structuredSentencesPerActivity,
+            maxPoints: maxPoints > 0 ? maxPoints : 10,
+            dueDate: dueDateVal ? new Date(dueDateVal).toISOString() : null,
+            scheduleDate: scheduleDateVal ? new Date(scheduleDateVal).toISOString() : null,
+            topicId: topicId || null,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+
+        alert(gcScheduledTime ? "📅 Assignment scheduled for publication on Google Classroom!" : "🎉 Assignment successfully posted to Google Classroom!");
+        closeModals();
+    } catch (err) {
+        console.error("Failed to publish assignment:", err);
+        alert("Error publishing assignment to Google Classroom: " + (err?.result?.error?.message || err.message || "Unknown error"));
     }
-
-    await assignmentRef.set({
-        id: assignmentId,
-        builderId: targetBuilderId,
-        builderSnapshot: builderSnapshot,
-        gClassroomAssignmentId: res.result.id,
-        courseId: courseId,
-        courseName: courseName,
-        title: title,
-        lang: window.duplicatingAssignmentLang || document.getElementById('meta-lang').value || meta.lang || "French",
-        selectedActivities: selectedActivities,
-        listenTradGapLevel: listenTradGapLevel,
-        listenDictationGapLevel: listenDictationGapLevel,
-        delayedDictationGapLevel: delayedDictationGapLevel,
-        delayedCopyingGapLevel: delayedCopyingGapLevel,
-        activityGapLevels: activityGapLevels,
-        beatRobotMode: beatRobotMode,
-        beatRobotSpeed: beatRobotSpeed,
-        sentencesPerActivity: structuredSentencesPerActivity,
-        maxPoints: maxPoints > 0 ? maxPoints : 10,
-        dueDate: dueDateVal ? new Date(dueDateVal).toISOString() : null,
-        scheduleDate: scheduleDateVal ? new Date(scheduleDateVal).toISOString() : null,
-        topicId: topicId || null,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-
-    alert(gcScheduledTime ? "📅 Assignment scheduled for publication on Google Classroom!" : "🎉 Assignment successfully posted to Google Classroom!");
-    closeModals();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
