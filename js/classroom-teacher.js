@@ -7,6 +7,7 @@ function escapeHtmlAttr(str) {
     return String(str ?? '')
         .replace(/&/g, '&amp;')
         .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
 }
@@ -126,6 +127,17 @@ function renderTeacherActivityListRows(list, selectedGapLevels = '1', selectedRo
         };
     const normalizedMode = normalizeBeatRobotModeValue(selectedRobotMode);
 
+    if (typeof buildActivitySelectorRowHTML === 'function') {
+        const combinedSettings = {
+            ...gapMap,
+            'beat-robot': normalizedMode
+        };
+        return list
+            .filter(a => a.id !== 'study')
+            .map(a => buildActivitySelectorRowHTML(a, combinedSettings))
+            .join('');
+    }
+
     const buildOptionsHTML = (selectedVal) => [
         { val: '1', label: '1 word' },
         { val: '25', label: '25% of words' },
@@ -151,16 +163,16 @@ function renderTeacherActivityListRows(list, selectedGapLevels = '1', selectedRo
         const selectedVal = gapMap[a.id] || '1';
 
         return `
-            <div class="activity-row" style="display:flex; align-items:center; gap:6px; padding:6px 6px; border-bottom:1px solid #f1f5f9;">
-                <input type="checkbox" value="${a.id}" id="chk-${a.id}" onchange="renderPerActivitySentenceBoxes()">
-                <label for="chk-${a.id}" style="cursor:pointer; font-weight:500; font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin:0;">${a.label}</label>
+            <div class="activity-row" onclick="if(event.target === this){ const cb = this.querySelector('input[type=checkbox]'); if(cb){ cb.checked = !cb.checked; renderPerActivitySentenceBoxes(); } }" style="flex: 0 0 auto !important; height: auto !important; min-height: 0 !important; padding: 6px 6px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 6px; cursor:pointer; pointer-events:auto !important;">
+                <input type="checkbox" value="${a.id}" id="chk-${a.id}" style="width:16px !important; height:16px !important; min-width:16px !important; margin:0 !important; flex-shrink:0 !important; cursor:pointer !important; pointer-events:auto !important; position:relative !important; z-index:2 !important; accent-color:#2563eb;" onchange="renderPerActivitySentenceBoxes()">
+                <label for="chk-${a.id}" style="cursor:pointer !important; pointer-events:auto !important; font-weight:500; font-size:13px; line-height:1.25; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin:0;">${a.label}</label>
                 ${hasGapDropdown ? `
                     <select id="${selectId}"
                             data-gap-activity="${a.id}"
                             onclick="event.stopPropagation()"
                             onchange="event.stopPropagation(); if (typeof onActivityGapLevelChange === 'function') { onActivityGapLevelChange('${a.id}', this); } else if ('${a.id}' === 'delayed-copying' && typeof onDelayedCopyingGapLevelChange === 'function') { onDelayedCopyingGapLevelChange(this); }"
                             title="Choose how many words are removed in ${a.label.replace(/^🎧\s*/, '')}"
-                            style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                            style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer; pointer-events:auto !important;">
                         ${buildOptionsHTML(selectedVal)}
                     </select>
                 ` : ''}
@@ -169,7 +181,7 @@ function renderTeacherActivityListRows(list, selectedGapLevels = '1', selectedRo
                             onclick="event.stopPropagation()"
                             onchange="event.stopPropagation(); if (typeof onBeatRobotModeChange === 'function') { onBeatRobotModeChange(this); } else if (typeof onRobotSpeedChange === 'function') { onRobotSpeedChange(this); }"
                             title="Choose whether vowels or consonants are removed in ${a.label}"
-                            style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                            style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer; pointer-events:auto !important;">
                         ${buildBeatRobotModeOptions(normalizedMode)}
                     </select>
                 ` : ''}
@@ -183,7 +195,7 @@ async function previewActiveAssignmentAsStudent() {
     if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 
-    const assignmentId = document.getElementById('sub-filter-assignment').value;
+    const assignmentId = document.getElementById('sub-filter-assignment')?.value;
     if (!assignmentId) return alert("Select an assignment first.");
 
     const doc = await db.collection("assignments").doc(assignmentId).get();
@@ -241,7 +253,9 @@ async function previewActiveAssignmentAsStudent() {
     if (hasStudySelected && perActSentences['study'] && perActSentences['study'].length > 0) {
         if (refBanner) refBanner.style.display = 'block';
         let refHtml = '<table style="width:100%; border-collapse:collapse;"><thead><tr><th>Target Language</th><th>English Translation</th></tr></thead><tbody>';
-        perActSentences['study'].forEach(s => { refHtml += `<tr><td><b>${s.t}</b></td><td>${s.tr}</td></tr>`; });
+        perActSentences['study'].forEach(s => {
+            refHtml += `<tr><td><b>${escapeHtmlAttr(s.t)}</b></td><td>${escapeHtmlAttr(s.tr)}</td></tr>`;
+        });
         refHtml += '</tbody></table>';
         const refBody = document.getElementById('ref-table-body');
         if (refBody) refBody.innerHTML = refHtml;
@@ -274,7 +288,7 @@ function exitTeacherPreview() {
 }
 
 async function duplicateCurrentAssignmentToClass() {
-    const assignmentId = document.getElementById('sub-filter-assignment').value;
+    const assignmentId = document.getElementById('sub-filter-assignment')?.value;
     if (!assignmentId) return alert("Select an assignment first.");
 
     const doc = await db.collection("assignments").doc(assignmentId).get();
@@ -288,6 +302,7 @@ async function duplicateCurrentAssignmentToClass() {
     }
 
     const clonedSentencesMap = assign.sentencesPerActivity ? JSON.parse(JSON.stringify(assign.sentencesPerActivity)) : null;
+    window.editingSavedSentencesMap = clonedSentencesMap ? { ...clonedSentencesMap } : {};
     window.duplicatingAssignmentLang = assign.lang || null;
 
     const currentLang = assign.lang || meta.lang || "Target Language";
@@ -303,14 +318,14 @@ async function duplicateCurrentAssignmentToClass() {
     document.getElementById('builder-title').value = assign.title || '';
 
     const selActs = (assign.selectedActivities || []).filter(id => id !== 'study');
-    document.querySelectorAll('#activity-list input').forEach(cb => {
+    document.querySelectorAll('#activity-list input[type="checkbox"]').forEach(cb => {
         cb.checked = selActs.includes(cb.value);
     });
 
     let detectedCount = 10;
     if (clonedSentencesMap) {
         for (let actKey in clonedSentencesMap) {
-            if (actKey !== 'study' && clonedSentencesMap[actKey].length > 0) {
+            if (actKey !== 'study' && Array.isArray(clonedSentencesMap[actKey]) && clonedSentencesMap[actKey].length > 0) {
                 detectedCount = clonedSentencesMap[actKey].length;
                 break;
             }
@@ -320,6 +335,9 @@ async function duplicateCurrentAssignmentToClass() {
     if (sentCountSelect) sentCountSelect.value = String(detectedCount);
 
     renderPerActivitySentenceBoxes(clonedSentencesMap);
+    if (typeof updateActivityCategoryCounts === 'function') {
+        updateActivityCategoryCounts(true);
+    }
 
     document.getElementById('activity-menu').style.display = 'flex';
     document.getElementById('overlay').style.display = 'block';
@@ -336,7 +354,7 @@ async function duplicateCurrentAssignmentToClass() {
 }
 
 async function downloadActiveAssignmentWorksheet() {
-    const assignmentId = document.getElementById('sub-filter-assignment').value;
+    const assignmentId = document.getElementById('sub-filter-assignment')?.value;
     if (!assignmentId) return alert("Select an assignment first.");
 
     const doc = await db.collection("assignments").doc(assignmentId).get();
@@ -351,6 +369,11 @@ async function downloadActiveAssignmentWorksheet() {
 
     if (selectedActs.length === 0) return alert("No activities found in assignment.");
 
+    const escapeWordHtml = str => String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
     const fallbackActivityTitles = {
         'match': 'Match up',
         'nospaces': 'No Spaces',
@@ -364,22 +387,27 @@ async function downloadActiveAssignmentWorksheet() {
         'trans-target': `Translate (${docLang})`
     };
 
-    const activityInstructions = {
-        'match': 'Match each ' + docLang + ' sentence (1–10) with its correct English translation (A–J).',
-        'nospaces': 'Rewrite the sentences adding correct spaces between the words.',
-        'jumbled': 'Reorder the words to form correct ' + docLang + ' sentences.',
-        'gap-en': 'Fill in the missing English words in the translations.',
-        'gap-t': 'Fill in the missing ' + docLang + ' words in each sentence.',
-        'vowels': 'Fill in the missing vowels to complete the sentences.',
-        'cons': 'Fill in the missing consonants to complete the sentences.',
-        'faulty': 'Find and correct the mistake in each English translation.',
-        'trans-en': 'Translate the following ' + docLang + ' sentences into English.',
-        'trans-target': 'Translate the following English sentences into ' + docLang + '.'
+    const getActivityInstruction = (type, itemCount) => {
+        const count = itemCount || 10;
+        const lastLetter = String.fromCharCode(64 + Math.min(26, Math.max(1, count)));
+        const map = {
+            'match': `Match each ${docLang} sentence (1–${count}) with its correct English translation (A–${lastLetter}).`,
+            'nospaces': 'Rewrite the sentences adding correct spaces between the words.',
+            'jumbled': `Reorder the words to form correct ${docLang} sentences.`,
+            'gap-en': 'Fill in the missing English words in the translations.',
+            'gap-t': `Fill in the missing ${docLang} words in each sentence.`,
+            'vowels': 'Fill in the missing vowels to complete the sentences.',
+            'cons': 'Fill in the missing consonants to complete the sentences.',
+            'faulty': 'Find and correct the mistake in each English translation.',
+            'trans-en': `Translate the following ${docLang} sentences into English.`,
+            'trans-target': `Translate the following English sentences into ${docLang}.`
+        };
+        return map[type] || '';
     };
 
     let contentHtml = 
         '<div class="header-block">' +
-            '<div class="doc-main-title">' + docTitle.toUpperCase() + ' <span class="doc-sub-info">' + docLang + ' | ' + docYear + '</span></div>' +
+            '<div class="doc-main-title">' + escapeWordHtml(docTitle).toUpperCase() + ' <span class="doc-sub-info">' + escapeWordHtml(docLang) + ' | ' + escapeWordHtml(docYear) + '</span></div>' +
             '<table class="student-info-table">' +
                 '<tr>' +
                     '<td><b>Name:</b> ___________________________</td>' +
@@ -396,36 +424,36 @@ async function downloadActiveAssignmentWorksheet() {
         if (['beat-robot', 'listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying', 'listen-missing', 'listen-faulty', 'listen-jumbled'].includes(type)) return;
 
         const isStudy = (type === 'study');
+        const currentSents = perAct[type] || [];
         const cleanTitle = (typeof getCleanActivityTitle === 'function')
             ? getCleanActivityTitle(type, docLang)
             : (fallbackActivityTitles[type] || type);
         const boxTitle = isStudy ? "Sentence Table" : ("Exercise " + exerciseCounter + ": " + cleanTitle);
         if (!isStudy) exerciseCounter++;
 
-        const textInstruction = isStudy ? "" : (activityInstructions[type] || "");
-        const instructionMarkup = textInstruction ? ('<div class="ex-instruction">' + textInstruction + '</div>') : '';
+        const textInstruction = isStudy ? "" : getActivityInstruction(type, currentSents.length);
+        const instructionMarkup = textInstruction ? ('<div class="ex-instruction">' + escapeWordHtml(textInstruction) + '</div>') : '';
 
         let activityHtml = 
             '<div class="activity-container">' +
                 '<table class="exercise-title-table">' +
                     '<tr>' +
                         '<td>' +
-                            '<div class="ex-title">' + boxTitle + '</div>' +
+                            '<div class="ex-title">' + escapeWordHtml(boxTitle) + '</div>' +
                             instructionMarkup +
                         '</td>' +
                     '</tr>' +
                 '</table>';
 
-        const currentSents = perAct[type] || [];
         let activityAnswersHtml = "";
-        if (!isStudy) activityAnswersHtml += '<div class="ak-group"><h3>' + boxTitle + '</h3><ol class="answer-list">';
+        if (!isStudy) activityAnswersHtml += '<div class="ak-group"><h3>' + escapeWordHtml(boxTitle) + '</h3><ol class="answer-list">';
 
         const usedGapWords = new Set();
 
         if (type === 'study') {
-            activityHtml += '<table class="sentence-grid-table"><tr><th>' + docLang + '</th><th>English Translation</th></tr>';
+            activityHtml += '<table class="sentence-grid-table"><tr><th>' + escapeWordHtml(docLang) + '</th><th>English Translation</th></tr>';
             currentSents.forEach(s => { 
-                activityHtml += '<tr><td style="padding:1pt 5pt; mso-para-margin:0pt;"><b>' + s.t + '</b></td><td class="blue" style="padding:1pt 5pt; mso-para-margin:0pt;">' + s.tr + '</td></tr>'; 
+                activityHtml += '<tr><td style="padding:1pt 5pt; mso-para-margin:0pt;"><b>' + escapeWordHtml(s.t) + '</b></td><td class="blue" style="padding:1pt 5pt; mso-para-margin:0pt;">' + escapeWordHtml(s.tr) + '</td></tr>'; 
             });
             activityHtml += '</table>';
         } else if (type === 'match') {
@@ -433,9 +461,9 @@ async function downloadActiveAssignmentWorksheet() {
             activityHtml += '<table class="match-table">';
             currentSents.forEach((s, i) => {
                 activityHtml += '<tr>' +
-                    '<td style="width:45%; padding: 3pt 0;"><b>' + (i+1) + '.</b> ' + s.t + '</td>' +
+                    '<td style="width:45%; padding: 3pt 0;"><b>' + (i+1) + '.</b> ' + escapeWordHtml(s.t) + '</td>' +
                     '<td style="width:10%; text-align:center; padding: 3pt 0;">[ &nbsp; ]</td>' +
-                    '<td style="width:45%; padding: 3pt 0;"><b>' + String.fromCharCode(65+i) + '.</b> ' + shuf[i].tr + '</td>' +
+                    '<td style="width:45%; padding: 3pt 0;"><b>' + String.fromCharCode(65+i) + '.</b> ' + escapeWordHtml(shuf[i].tr) + '</td>' +
                 '</tr>';
                 const matchIndex = shuf.indexOf(s);
                 const correctLetter = String.fromCharCode(65 + (matchIndex >= 0 ? matchIndex : 0));
@@ -446,36 +474,37 @@ async function downloadActiveAssignmentWorksheet() {
             const needsWritingLine = ['nospaces', 'jumbled', 'faulty', 'trans-en', 'trans-target'].includes(type);
 
             currentSents.forEach((s, i) => {
-                let out = s.t, hint = '<span class="blue">(' + s.tr + ')</span>';
-                let answerText = s.t;
+                let out = escapeWordHtml(s.t);
+                let hint = '<span class="blue">(' + escapeWordHtml(s.tr) + ')</span>';
+                let answerText = escapeWordHtml(s.t);
 
                 if (type === 'vowels' || type === 'cons') {
                     const pattern = (type === 'vowels')
                         ? /[aeiouáéíóúàèìòùâêîôûäëïöüÿ]/gi
                         : /[bcdfghjklmnpqrstvwxyzßçñ]/gi;
-                    out = s.t.split(' ').map(word => word.replace(pattern, ' __ ')).join('&nbsp;&nbsp;');
+                    out = escapeWordHtml(s.t).split(' ').map(word => word.replace(pattern, ' __ ')).join('&nbsp;&nbsp;');
                 } else if (type === 'nospaces') {
-                    out = s.t.replace(/\s+/g, '').toLowerCase();
+                    out = escapeWordHtml((s.t || '').replace(/\s+/g, '').toLowerCase());
                 } else if (type === 'jumbled') {
-                    out = shuffleArray(s.t.split(' ')).join(' / ');
+                    out = escapeWordHtml(shuffleArray((s.t || '').split(' ')).join(' / '));
                 } else if (type === 'gap-t') {
-                    let rawTarget = s.t;
+                    let rawTarget = s.t || '';
                     if (!extractGapWord(rawTarget).fullMatch) {
                         rawTarget = addAsteriskToGapWord(rawTarget, usedGapWords);
                     }
                     const gapRes = extractGapWord(rawTarget);
                     if (gapRes.fullMatch) {
-                        out = rawTarget.replace(gapRes.fullMatch, '___________');
+                        out = escapeWordHtml(rawTarget.replace(gapRes.fullMatch, '___________'));
                     } else {
                         const words = rawTarget.split(' ');
                         const targetIdx = Math.floor(words.length / 2);
                         words[targetIdx] = '___________';
-                        out = words.join(' ');
+                        out = escapeWordHtml(words.join(' '));
                     }
-                    answerText = rawTarget.replace(/\*/g, '');
+                    answerText = escapeWordHtml(rawTarget.replace(/\*/g, ''));
                 } else if (type === 'gap-en') {
-                    out = s.t;
-                    let rawEnglish = s.tr;
+                    out = escapeWordHtml(s.t);
+                    let rawEnglish = s.tr || '';
                     if (!extractGapWord(rawEnglish).fullMatch) {
                         rawEnglish = addAsteriskToGapWord(rawEnglish, usedGapWords);
                     }
@@ -489,21 +518,23 @@ async function downloadActiveAssignmentWorksheet() {
                         wordsEn[targetIdxEn] = '___________';
                         maskedTr = wordsEn.join(' ');
                     }
-                    hint = '<span class="blue">(' + maskedTr + ')</span>';
-                    answerText = rawEnglish.replace(/\*/g, '');
+                    hint = '<span class="blue">(' + escapeWordHtml(maskedTr) + ')</span>';
+                    answerText = escapeWordHtml(rawEnglish.replace(/\*/g, ''));
                 } else if (type === 'trans-en') {
-                    out = s.t; hint = ""; answerText = s.tr;
+                    out = escapeWordHtml(s.t);
+                    hint = "";
+                    answerText = escapeWordHtml(s.tr);
                 } else if (type === 'trans-target') {
-                    out = '<span class="blue">' + s.tr + '</span>'; hint = "";
+                    out = '<span class="blue">' + escapeWordHtml(s.tr) + '</span>';
+                    hint = "";
                 } else if (type === 'faulty') {
-                    out = s.t + ' = <span class="blue">' + (s.faultyTr || s.tr) + '</span>';
-                    answerText = s.tr;
+                    out = escapeWordHtml(s.t) + ' = <span class="blue">' + escapeWordHtml(s.faultyTr || s.tr) + '</span>';
                     activityHtml += 
                         '<div class="exercise-item-wrapper">' +
                             '<p class="exercise-item"><b>' + (i+1) + '.</b> ' + out + '</p>' +
                             (needsWritingLine ? '<p class="writing-line">&nbsp;</p>' : '') +
                         '</div>';
-                    activityAnswersHtml += '<li>' + s.t + ' = <span class="blue">' + s.tr + '</span></li>';
+                    activityAnswersHtml += '<li>' + escapeWordHtml(s.t) + ' = <span class="blue">' + escapeWordHtml(s.tr) + '</span></li>';
                     return;
                 }
 
@@ -614,7 +645,7 @@ function formatStudentTimeSpent(sub) {
     if (!sub) return '<span style="color:#94a3b8;">—</span>';
 
     if (typeof sub.timeSpent === 'string' && sub.timeSpent.trim() !== '') {
-        return sub.timeSpent.trim();
+        return escapeHtmlAttr(sub.timeSpent.trim());
     }
 
     let totalSeconds = null;
@@ -648,6 +679,24 @@ function formatStudentTimeSpent(sub) {
         return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
     }
     return `${secs}s`;
+}
+
+async function fetchAllCourseStudents(courseId) {
+    if (!courseId) return [];
+    const isLoaded = await ensureGapiClassroomLoaded();
+    if (!isLoaded) return [];
+
+    let allStudents = [];
+    let pageToken = null;
+    do {
+        const params = { courseId, pageSize: 100 };
+        if (pageToken) params.pageToken = pageToken;
+        const rosterRes = await gapi.client.classroom.courses.students.list(params);
+        allStudents = allStudents.concat(rosterRes.result.students || []);
+        pageToken = rosterRes.result.nextPageToken || null;
+    } while (pageToken);
+
+    return allStudents;
 }
 
 async function loadTeacherSubmissions() {
@@ -704,12 +753,12 @@ async function loadTeacherSubmissions() {
 
         if (courseSelect) {
             courseSelect.innerHTML = '<option value="">-- Choose Classroom Course --</option>' +
-                courses.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+                courses.map(c => `<option value="${escapeHtmlAttr(c.id)}">${escapeHtmlAttr(c.name)}</option>`).join('');
             courseSelect.value = "";
         }
 
     } catch (e) {
-        if (courseSelect) courseSelect.innerHTML = `<option value="">Error loading courses: ${e.message}</option>`;
+        if (courseSelect) courseSelect.innerHTML = `<option value="">Error loading courses: ${escapeHtmlAttr(e.message)}</option>`;
     }
 }
 
@@ -777,12 +826,12 @@ async function loadCourseAssignments(courseId) {
 
         if (assignSelect) {
             assignSelect.innerHTML = '<option value="">-- Choose Assignment --</option>' +
-                docsData.map(doc => `<option value="${doc.id}">${doc.title || 'Untitled Assignment'}</option>`).join('');
+                docsData.map(doc => `<option value="${escapeHtmlAttr(doc.id)}">${escapeHtmlAttr(doc.title || 'Untitled Assignment')}</option>`).join('');
             assignSelect.value = "";
         }
 
     } catch (e) {
-        if (assignSelect) assignSelect.innerHTML = `<option value="">Error loading tasks: ${e.message}</option>`;
+        if (assignSelect) assignSelect.innerHTML = `<option value="">Error loading tasks: ${escapeHtmlAttr(e.message)}</option>`;
     }
 }
 
@@ -794,13 +843,13 @@ async function renderStudentSubmissionsTable() {
         window.submissionsUnsubscribe = null;
     }
 
-    const assignmentId = document.getElementById('sub-filter-assignment').value;
+    const assignmentId = document.getElementById('sub-filter-assignment')?.value;
     const tbody = document.getElementById('submissions-table-body');
     const infoBanner = document.getElementById('active-assignment-info');
 
     if (!assignmentId) {
         if (infoBanner) infoBanner.style.display = 'none';
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b;">Select an assignment to view grades.</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b;">Select an assignment to view grades.</td></tr>`;
         return;
     }
 
@@ -833,6 +882,10 @@ async function renderStudentSubmissionsTable() {
                     : formatRobotSpeedLabel(assign.beatRobotSpeed);
                 metaText += ` | 🤖 Beat the Robot: ${robotInfo}`;
             }
+            if (assign.assigneeMode === 'INDIVIDUAL_STUDENTS' && Array.isArray(assign.assignedStudentIds)) {
+                const count = assign.assignedStudentIds.length;
+                metaText += ` | 👤 Assigned: ${count} student${count === 1 ? '' : 's'}`;
+            }
             if (assign.dueDate) {
                 metaText += ` | Due: ${new Date(assign.dueDate).toLocaleString([], {dateStyle:'short', timeStyle:'short'})}`;
             }
@@ -845,49 +898,72 @@ async function renderStudentSubmissionsTable() {
 
     window.submissionsUnsubscribe = db.collection("submissions")
         .where("assignmentId", "==", assignmentId)
-        .onSnapshot(snap => {
-            tbody.innerHTML = '';
-            
-            const subCount = snap.size;
-            const counterBadge = document.getElementById('submission-counter-badge');
-            if (counterBadge) counterBadge.innerText = `📥 ${subCount} Submitted`;
+        .onSnapshot(
+            snap => {
+                tbody.innerHTML = '';
 
-            if (snap.empty) {
-                tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b; padding:20px;">No student submissions found for this task yet.</td></tr>`;
-                return;
+                const subCount = snap.size;
+                const counterBadge = document.getElementById('submission-counter-badge');
+                if (counterBadge) counterBadge.innerText = `📥 ${subCount} Submitted`;
+
+                if (snap.empty) {
+                    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b; padding:20px;">No student submissions found for this task yet.</td></tr>`;
+                    return;
+                }
+
+                const rows = [];
+                snap.forEach(doc => rows.push({ id: doc.id, ...doc.data() }));
+                rows.sort((a, b) => {
+                    const getMs = (item) => {
+                        const t = item.submittedAt;
+                        if (!t) return Number.MAX_SAFE_INTEGER;
+                        if (typeof t.toMillis === 'function') return t.toMillis();
+                        if (typeof t.toDate === 'function') return t.toDate().getTime();
+                        return new Date(t).getTime() || 0;
+                    };
+                    return getMs(a) - getMs(b);
+                });
+
+                rows.forEach(sub => {
+                    const subId = sub.id;
+                    const gradeVal = sub.overallGrade !== undefined ? sub.overallGrade : sub.totalEarned;
+                    const safeComment = escapeHtmlAttr(sub.teacherComment || '');
+                    const safeName = escapeHtmlAttr(sub.studentName || 'Student');
+                    const safeEmail = escapeHtmlAttr(sub.studentEmail || '');
+                    const submittedStr = sub.submittedAt && typeof sub.submittedAt.toDate === 'function'
+                        ? sub.submittedAt.toDate().toLocaleString()
+                        : 'Just now';
+
+                    tbody.innerHTML += `
+                        <tr>
+                            <td><b>${safeName}</b></td>
+                            <td>${safeEmail}</td>
+                            <td>${submittedStr}</td>
+                            <td>
+                                ${sub.totalEarned} / ${sub.totalPossible} (${sub.percentage}%)<br>
+                                <button onclick="inspectStudentAnswers('${escapeHtmlAttr(subId)}')" class="btn-info" style="font-size:11px; padding:3px 8px; margin-top:4px;">🔍 Edit Marks & Answers</button>
+                            </td>
+                            <td>
+                                <input type="number" id="grade-${escapeHtmlAttr(subId)}" value="${escapeHtmlAttr(gradeVal)}" style="width:50px; padding:4px;"> 
+                                / <input type="number" id="possible-${escapeHtmlAttr(subId)}" value="${escapeHtmlAttr(sub.totalPossible)}" style="width:50px; padding:4px;">
+                            </td>
+                            <td style="white-space:nowrap; font-weight:600; color:#334155;">${formatStudentTimeSpent(sub)}</td>
+                            <td><input type="text" id="comment-${escapeHtmlAttr(subId)}" value="${safeComment}" style="width:100%; padding:4px;"></td>
+                            <td>
+                                <div style="display:flex; gap:6px; align-items:center;">
+                                    <button onclick="saveAndSyncGrade('${escapeHtmlAttr(subId)}')" class="btn-purple" style="font-size:12px;">🚀 Sync</button>
+                                    <button onclick="deleteStudentSubmission('${escapeHtmlAttr(subId)}')" class="btn-danger" style="font-size:12px;">🗑️ Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                });
+            },
+            err => {
+                console.error("Submissions listener error:", err);
+                tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#ef4444; padding:20px;">Error loading submissions: ${escapeHtmlAttr(err.message)}</td></tr>`;
             }
-
-            snap.forEach(doc => {
-                const sub = doc.data();
-                const subId = doc.id;
-                const gradeVal = sub.overallGrade !== undefined ? sub.overallGrade : sub.totalEarned;
-                const safeComment = escapeHtmlAttr(sub.teacherComment || '');
-
-                tbody.innerHTML += `
-                    <tr>
-                        <td><b>${sub.studentName}</b></td>
-                        <td>${sub.studentEmail}</td>
-                        <td>${sub.submittedAt ? sub.submittedAt.toDate().toLocaleString() : 'Just now'}</td>
-                        <td>
-                            ${sub.totalEarned} / ${sub.totalPossible} (${sub.percentage}%)<br>
-                            <button onclick="inspectStudentAnswers('${subId}')" class="btn-info" style="font-size:11px; padding:3px 8px; margin-top:4px;">🔍 Edit Marks & Answers</button>
-                        </td>
-                        <td>
-                            <input type="number" id="grade-${subId}" value="${gradeVal}" style="width:50px; padding:4px;"> 
-                            / <input type="number" id="possible-${subId}" value="${sub.totalPossible}" style="width:50px; padding:4px;">
-                        </td>
-                        <td style="white-space:nowrap; font-weight:600; color:#334155;">${formatStudentTimeSpent(sub)}</td>
-                        <td><input type="text" id="comment-${subId}" value="${safeComment}" style="width:100%; padding:4px;"></td>
-                        <td>
-                            <div style="display:flex; gap:6px; align-items:center;">
-                                <button onclick="saveAndSyncGrade('${subId}')" class="btn-purple" style="font-size:12px;">🚀 Sync</button>
-                                <button onclick="deleteStudentSubmission('${subId}')" class="btn-danger" style="font-size:12px;">🗑️ Delete</button>
-                            </div>
-                        </td>
-                    </tr>
-                `;
-            });
-        });
+        );
 }
 
 async function deleteStudentSubmission(subId) {
@@ -904,7 +980,7 @@ async function deleteStudentSubmission(subId) {
 }
 
 async function editCurrentAssignment() {
-    const assignmentId = document.getElementById('sub-filter-assignment').value;
+    const assignmentId = document.getElementById('sub-filter-assignment')?.value;
     if (!assignmentId) return alert("Select an assignment first.");
 
     const doc = await db.collection("assignments").doc(assignmentId).get();
@@ -931,14 +1007,14 @@ async function editCurrentAssignment() {
     document.getElementById('builder-title').value = assign.title || '';
 
     const selActs = (assign.selectedActivities || []).filter(id => id !== 'study');
-    document.querySelectorAll('#activity-list input').forEach(cb => {
+    document.querySelectorAll('#activity-list input[type="checkbox"]').forEach(cb => {
         cb.checked = selActs.includes(cb.value);
     });
 
     let detectedCount = 10;
     if (assign.sentencesPerActivity) {
         for (let actKey in assign.sentencesPerActivity) {
-            if (actKey !== 'study' && assign.sentencesPerActivity[actKey].length > 0) {
+            if (actKey !== 'study' && Array.isArray(assign.sentencesPerActivity[actKey]) && assign.sentencesPerActivity[actKey].length > 0) {
                 detectedCount = assign.sentencesPerActivity[actKey].length;
                 break;
             }
@@ -948,6 +1024,9 @@ async function editCurrentAssignment() {
     if (sentCountSelect) sentCountSelect.value = String(detectedCount);
 
     renderPerActivitySentenceBoxes(assign.sentencesPerActivity || null);
+    if (typeof updateActivityCategoryCounts === 'function') {
+        updateActivityCategoryCounts(true);
+    }
 
     document.getElementById('activity-menu').style.display = 'flex';
     document.getElementById('overlay').style.display = 'block';
@@ -966,7 +1045,10 @@ async function editCurrentAssignment() {
             }
             courseSelect.value = assign.courseId;
         }
-        await loadCourseTopics(assign.courseId);
+        await Promise.all([
+            loadCourseTopics(assign.courseId),
+            typeof loadCourseStudents === 'function' ? loadCourseStudents(assign.courseId, assign) : Promise.resolve()
+        ]);
         if (assign.topicId) {
             const topicSelect = document.getElementById('gc-topic-select');
             if (topicSelect) topicSelect.value = assign.topicId;
@@ -994,7 +1076,7 @@ async function editCurrentAssignment() {
 }
 
 async function deleteCurrentAssignment() {
-    const assignmentId = document.getElementById('sub-filter-assignment').value;
+    const assignmentId = document.getElementById('sub-filter-assignment')?.value;
     if (!assignmentId) return alert("Select an assignment first.");
     if (!confirm("Are you sure you want to delete this assignment and all linked student submissions and drafts?")) return;
 
@@ -1037,7 +1119,7 @@ async function deleteCurrentAssignment() {
         alert("Assignment, submissions, and drafts deleted successfully!");
 
         document.getElementById('active-assignment-info').style.display = 'none';
-        const courseId = document.getElementById('sub-filter-course').value;
+        const courseId = document.getElementById('sub-filter-course')?.value;
         loadCourseAssignments(courseId);
     } catch (e) {
         console.error("Error deleting assignment:", e);
@@ -1046,7 +1128,7 @@ async function deleteCurrentAssignment() {
 }
 
 async function syncAllClassroomGrades() {
-    const assignmentId = document.getElementById('sub-filter-assignment').value;
+    const assignmentId = document.getElementById('sub-filter-assignment')?.value;
     if (!assignmentId) return alert("Select an assignment first.");
 
     const syncBtn = document.getElementById('sync-all-classroom-grades-btn');
@@ -1066,16 +1148,10 @@ async function syncAllClassroomGrades() {
 
         let rosterStudents = null;
         if (assign && assign.courseId && assign.gClassroomAssignmentId) {
-            const isLoaded = await ensureGapiClassroomLoaded();
-            if (isLoaded) {
-                try {
-                    const rosterRes = await gapi.client.classroom.courses.students.list({
-                        courseId: assign.courseId
-                    });
-                    rosterStudents = rosterRes.result.students || [];
-                } catch (rErr) {
-                    console.warn("Could not fetch course roster:", rErr);
-                }
+            try {
+                rosterStudents = await fetchAllCourseStudents(assign.courseId);
+            } catch (rErr) {
+                console.warn("Could not fetch course roster:", rErr);
             }
         }
 
@@ -1128,7 +1204,7 @@ async function inspectStudentAnswers(subId) {
     
     let html = `
         <div style="background:#f8fafc; padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid #e2e8f0;">
-            <b>Student:</b> ${sub.studentName} (${sub.studentEmail})<br>
+            <b>Student:</b> ${escapeHtmlAttr(sub.studentName)} (${escapeHtmlAttr(sub.studentEmail)})<br>
             <b>Auto Score:</b> ${sub.totalEarned} / ${sub.totalPossible} (${sub.percentage}%)
         </div>
     `;
@@ -1141,34 +1217,35 @@ async function inspectStudentAnswers(subId) {
             html += `
                 <div style="border:1px solid #cbd5e1; border-radius:8px; margin-bottom:15px; overflow:hidden;">
                     <div style="background:#e2e8f0; padding:10px 15px; font-weight:bold; color:#0f172a;">
-                        Exercise ${actIdx + 1}: ${act.activityTitle}
+                        Exercise ${actIdx + 1}: ${escapeHtmlAttr(act.activityTitle)}
                     </div>
                     <div style="padding:12px;">
                         ${(act.responses || []).map((r, i) => {
                             const currentScore = r.points !== undefined ? r.points : (r.isCorrect ? 1 : 0);
+                            const maxItemPts = r.maxPoints || Math.max(1, currentScore);
                             const showMistakeBadge = r.mistakes !== undefined && (r.mistakes > 0 || currentScore > 0);
                             return `
                                 <div style="padding:8px 0; border-bottom:1px solid #f1f5f9; display:flex; justify-content:space-between; align-items:center; gap:10px;">
                                     <div style="flex:1;">
-                                        <div><b>${i + 1}. Prompt:</b> ${r.prompt}</div>
+                                        <div><b>${i + 1}. Prompt:</b> ${escapeHtmlAttr(r.prompt)}</div>
                                         <div style="color:${currentScore >= 1 ? '#10b981' : (currentScore > 0 ? '#d97706' : '#ef4444')}; margin-top:2px;">
-                                            <b>Student Answer:</b> ${r.studentAnswer}
+                                            <b>Student Answer:</b> ${escapeHtmlAttr(r.studentAnswer)}
                                             ${showMistakeBadge ? `
                                                 <span style="display:inline-block; margin-left:8px; font-size:11px; padding:2px 6px; border-radius:4px; font-weight:bold; background:${r.mistakes === 0 ? '#d1fae5' : '#fef3c7'}; color:${r.mistakes === 0 ? '#065f46' : '#92400e'};">
                                                     ${r.mistakes === 0 ? '✓' : `⚠️ ${r.mistakes} Mistake(s)`}
                                                 </span>
                                             ` : ''}
                                         </div>
-                                        ${currentScore < 1 ? `<div style="color:#2563eb; font-weight:bold; font-size:12px; margin-top:3px;"><b>Correct Answer:</b> ${r.correctAnswer}</div>` : ''}
+                                        ${currentScore < 1 ? `<div style="color:#2563eb; font-weight:bold; font-size:12px; margin-top:3px;"><b>Correct Answer:</b> ${escapeHtmlAttr(r.correctAnswer)}</div>` : ''}
                                     </div>
                                     <div style="display:flex; align-items:center; gap:4px; font-weight:bold; background:#f8fafc; padding:4px 8px; border-radius:6px; border:1px solid #cbd5e1;">
-                                        <input type="number" step="0.5" min="0" max="${Math.max(1, currentScore)}" 
+                                        <input type="number" step="0.5" min="0" max="${maxItemPts}" 
                                             class="item-score-input" 
                                             data-act-idx="${actIdx}" 
                                             data-resp-idx="${i}" 
                                             value="${currentScore}" 
                                             style="width:50px; padding:4px; text-align:center; border:1px solid #94a3b8; border-radius:4px; font-weight:bold;">
-                                        <span>/ 1 pt</span>
+                                        <span>/ ${maxItemPts} pt${maxItemPts === 1 ? '' : 's'}</span>
                                     </div>
                                 </div>
                             `;
@@ -1179,7 +1256,7 @@ async function inspectStudentAnswers(subId) {
         });
 
         html += `
-            <button onclick="saveItemizedMarks('${subId}')" class="btn-purple" style="width:100%; height:42px; font-size:15px; margin-top:10px;">
+            <button onclick="saveItemizedMarks('${escapeHtmlAttr(subId)}')" class="btn-purple" style="width:100%; height:42px; font-size:15px; margin-top:10px;">
                 💾 Save Sentence Marks & Recalculate Total
             </button>
         `;
@@ -1311,17 +1388,19 @@ async function saveAndSyncGrade(subId, options = {}) {
         let students = preloadedRoster;
         if (!students) {
             try {
-                const rosterRes = await gapi.client.classroom.courses.students.list({
-                    courseId: assign.courseId
-                });
-                students = rosterRes.result.students || [];
+                students = await fetchAllCourseStudents(assign.courseId);
             } catch (rErr) {
                 console.warn("Could not fetch course roster:", rErr);
                 students = [];
             }
         }
 
-        const found = students.find(st => st.profile && st.profile.emailAddress && st.profile.emailAddress.toLowerCase() === sub.studentEmail.toLowerCase());
+        const found = students.find(st =>
+            st.profile &&
+            st.profile.emailAddress &&
+            sub.studentEmail &&
+            st.profile.emailAddress.toLowerCase() === sub.studentEmail.toLowerCase()
+        );
         if (found) {
             studentUserId = found.userId;
         }
