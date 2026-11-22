@@ -2,37 +2,32 @@
    PREVIEW & OPTIONS MENU
 ========================= */
 const MULTI_GAP_ACTIVITY_IDS = ['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'];
-const ROBOT_SPEED_ACTIVITY_ID = 'beat-robot';
+const BEAT_ROBOT_ACTIVITY_ID = 'beat-robot';
 
-function getRobotSpeedOptionsHTML(selectedSpeed = '1500') {
-    const validSpeeds = ['750', '1000', '1500', '2000', '2500', '3000'];
-    const normalized = validSpeeds.includes(String(selectedSpeed))
-        ? String(selectedSpeed)
-        : '1500';
+function getBeatRobotModeOptionsHTML(selectedMode = 'vowels') {
+    const normalized = ['vowels', 'consonants'].includes(String(selectedMode).toLowerCase())
+        ? String(selectedMode).toLowerCase()
+        : 'vowels';
     const options = [
-        { val: '750', label: 'Turbo (0.75s)' },
-        { val: '1000', label: 'Fast (1.0s)' },
-        { val: '1500', label: 'Medium (1.5s)' },
-        { val: '2000', label: 'Slow (2.0s)' },
-        { val: '2500', label: 'Very Slow (2.5s)' },
-        { val: '3000', label: 'Relaxed (3.0s)' }
+        { val: 'vowels', label: 'Vowels' },
+        { val: 'consonants', label: 'Consonants' }
     ];
     return options
         .map(o => `<option value="${o.val}" ${o.val === normalized ? 'selected' : ''}>${o.label}</option>`)
         .join('');
 }
 
-function onRobotSpeedChange(selectEl) {
+function onBeatRobotModeChange(selectEl) {
     const chk = document.getElementById('chk-beat-robot');
     if (chk && !chk.checked) {
         chk.checked = true;
         renderPerActivitySentenceBoxes();
         return;
     }
-    const label = selectEl?.options?.[selectEl.selectedIndex]?.text || 'Medium (1.5s)';
-    const badge = document.getElementById('beat-robot-card-speed-badge');
+    const label = selectEl?.options?.[selectEl.selectedIndex]?.text || 'Vowels';
+    const badge = document.getElementById('beat-robot-card-mode-badge');
     if (badge) {
-        badge.innerText = `(${label})`;
+        badge.innerText = `(${label} removed)`;
     }
     updateAssignmentTimeEstimate();
 }
@@ -101,12 +96,12 @@ function resolveActivityGapLevelFromArg(actId, gapLevelsOrSingle = '1') {
 }
 
 function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle = 'flex: 0 0 auto !important; height: auto !important; min-height: 0 !important; padding: 6px 6px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 6px;') {
-    const isMultiGap = MULTI_GAP_ACTIVITY_IDS.includes(a.id);
-    const isRobotSpeed = (a.id === ROBOT_SPEED_ACTIVITY_ID);
+   const isMultiGap = MULTI_GAP_ACTIVITY_IDS.includes(a.id);
+    const isBeatRobot = (a.id === BEAT_ROBOT_ACTIVITY_ID);
     const selectedLevel = resolveActivityGapLevelFromArg(a.id, gapLevelsOrSingle);
-    const selectedSpeed = (gapLevelsOrSingle && typeof gapLevelsOrSingle === 'object' && gapLevelsOrSingle['beat-robot'])
+    const selectedRobotMode = (gapLevelsOrSingle && typeof gapLevelsOrSingle === 'object' && gapLevelsOrSingle['beat-robot'])
         ? String(gapLevelsOrSingle['beat-robot'])
-        : '1500';
+        : 'vowels';
 
     let dropdownHTML = '';
     if (isMultiGap) {
@@ -117,13 +112,13 @@ function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle 
                 style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
                 ${getActivityGapOptionsHTML(selectedLevel)}
            </select>`;
-    } else if (isRobotSpeed) {
-        dropdownHTML = `<select id="beat-robot-speed-select"
+    } else if (isBeatRobot) {
+        dropdownHTML = `<select id="beat-robot-mode-select"
                 onclick="event.stopPropagation()"
-                onchange="event.stopPropagation(); onRobotSpeedChange(this)"
-                title="Choose how fast the robot types each letter"
-                style="margin-left:auto; flex-shrink:0; max-width:118px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
-                ${getRobotSpeedOptionsHTML(selectedSpeed)}
+                onchange="event.stopPropagation(); onBeatRobotModeChange(this)"
+                title="Choose whether vowels or consonants are removed in ${a.label}"
+                style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                ${getBeatRobotModeOptionsHTML(selectedRobotMode)}
            </select>`;
     }
 
@@ -568,9 +563,10 @@ function estimateSingleSentenceSeconds(actId, sentenceObj) {
             // Reconstructing every word from partial letter skeleton + recalling accents/endings
             return 7.0 + (chars * 0.65);
 case 'beat-robot': {
-    const speedMs = parseInt(document.getElementById('beat-robot-speed-select')?.value || '1500', 10) || 1500;
-    const approxMissingLetters = Math.max(2, Math.round(chars * 0.45));
-    return 4.5 + (approxMissingLetters * Math.min(speedMs / 1000, 1.8));
+    const mode = document.getElementById('beat-robot-mode-select')?.value || 'vowels';
+    const ratio = mode === 'consonants' ? 0.58 : 0.42;
+    const approxMissingLetters = Math.max(2, Math.round(chars * ratio));
+    return 4.5 + (approxMissingLetters * 1.5);
 }
         case 'listen-trad': {
             const { count, pct } = getGapStats(actId);
@@ -1023,11 +1019,12 @@ function openActivityMenu() {
     ];
 
     const defaultGapLevels = {
-        'listen-trad': '1',
-        'listen-dictation': '1',
-        'delayed-dictation': '1',
-        'delayed-copying': '1'
-    };
+    'listen-trad': '1',
+    'listen-dictation': '1',
+    'delayed-dictation': '1',
+    'delayed-copying': '1',
+    'beat-robot': 'vowels'
+};
 
     const textActivities = list.filter(a => !AUDIO_ACTIVITY_IDS.includes(a.id));
     const audioActivities = list.filter(a => AUDIO_ACTIVITY_IDS.includes(a.id));
@@ -2060,9 +2057,9 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null, preserveCat
             gapBadgeHTML = `<span id="${badgeId}" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${gapLabel} removed)</span>`;
         }
 if (actId === 'beat-robot') {
-    const speedSelect = document.getElementById('beat-robot-speed-select');
-    const speedLabel = speedSelect ? (speedSelect.options[speedSelect.selectedIndex]?.text || 'Medium (1.5s)') : 'Medium (1.5s)';
-    gapBadgeHTML = `<span id="beat-robot-card-speed-badge" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${speedLabel})</span>`;
+    const modeSelect = document.getElementById('beat-robot-mode-select');
+    const modeLabel = modeSelect ? (modeSelect.options[modeSelect.selectedIndex]?.text || 'Vowels') : 'Vowels';
+    gapBadgeHTML = `<span id="beat-robot-card-mode-badge" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${modeLabel} removed)</span>`;
 }
         const isExpanded = expandedActivityIds.has(actId);
 
@@ -2516,9 +2513,10 @@ async function publishTaskToClassroom() {
     const delayedCopyingGapLevel = selectedActivities.includes('delayed-copying')
         ? (document.getElementById('delayed-copying-gap-select')?.value || '1')
         : '1';
-const beatRobotSpeed = selectedActivities.includes('beat-robot')
-    ? (document.getElementById('beat-robot-speed-select')?.value || '1500')
-    : '1500';
+const beatRobotMode = selectedActivities.includes('beat-robot')
+    ? (document.getElementById('beat-robot-mode-select')?.value || 'vowels')
+    : 'vowels';
+const beatRobotSpeed = '1500';
     const activityGapLevels = {
         'listen-trad': listenTradGapLevel,
         'listen-dictation': listenDictationGapLevel,
