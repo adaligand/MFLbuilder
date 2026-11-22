@@ -5,6 +5,15 @@ const STUDENT_MULTI_GAP_ACTIVITIES = ['listen-trad', 'listen-dictation', 'delaye
 const STUDENT_VOWELS_REGEX = /[aeiouáéíóúàèìòùâêîôûäëïöüÿ]/i;
 const STUDENT_CONSONANTS_REGEX = /[bcdfghjklmnpqrstvwxyzßçñ]/i;
 
+function escapeStudentHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 /* =========================
    STUDENT ACTIVE TIME TRACKER
 ========================= */
@@ -152,7 +161,6 @@ function startStudentTimeTracker(assignmentId, studentEmail = null, initialSecon
     let bestElapsed = Number(initialSeconds) || 0;
     let startedAt = existingStartedAt || null;
 
-    // Check localStorage for any previously saved time (including pre-login guest time)
     const keysToCheck = [getStudentTimeStorageKey(assignmentId, normalizedEmail)];
     if (normalizedEmail) {
         keysToCheck.push(getStudentTimeStorageKey(assignmentId, 'guest'));
@@ -320,6 +328,15 @@ function getBeatRobotSpeedConfig() {
                 headStartMs: Math.round(1800 / num)
             };
         }
+        if (num > 50) {
+            return {
+                key: raw,
+                label: `${(num / 1000).toFixed(1)}s`,
+                stepIntervalMs: Math.round(num),
+                msPerChar: 185,
+                headStartMs: 1000
+            };
+        }
         return {
             key: raw,
             label: `${num}s`,
@@ -340,11 +357,12 @@ function createBeatRobotSentenceHTML(text, mode, isPlayer = true, savedLetters =
     const vowels = 'aeiouAEIOUáéíóúàèìòùâêîôûäëïöüÿÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÄËÏÖÜŸ';
     const words = (text || '').trim().split(/\s+/).filter(Boolean);
 
-    // Count how many letters match the chosen mode so sentences with 0 matching chars still remain playable
+    let letterCount = 0;
     let matchCount = 0;
     words.forEach(word => {
         for (const char of word) {
             if (/\p{L}/u.test(char)) {
+                letterCount++;
                 const isVowel = vowels.includes(char);
                 if ((mode === 'vowels' && isVowel) || (mode === 'consonants' && !isVowel)) {
                     matchCount++;
@@ -359,9 +377,12 @@ function createBeatRobotSentenceHTML(text, mode, isPlayer = true, savedLetters =
     words.forEach(word => {
         html += '<div class="word-wrapper">';
         for (const char of word) {
-            if (/\p{L}/u.test(char)) {
+            const isLetter = /\p{L}/u.test(char);
+            const isFallbackChar = (letterCount === 0 && /\p{N}/u.test(char));
+
+            if (isLetter || isFallbackChar) {
                 const isVowel = vowels.includes(char);
-                const shouldBeInput = matchCount > 0
+                const shouldBeInput = (isLetter && matchCount > 0)
                     ? ((mode === 'vowels' && isVowel) || (mode === 'consonants' && !isVowel))
                     : true;
 
@@ -377,18 +398,18 @@ function createBeatRobotSentenceHTML(text, mode, isPlayer = true, savedLetters =
                             stateClass = (savedChar.toLowerCase() === char.toLowerCase()) ? ' correct-answer' : ' wrong-answer';
                         }
                         const disabledAttr = revealAll ? 'disabled' : '';
-                        html += `<input type="text" class="single-letter br-player-input${stateClass}" maxlength="1" value="${displayVal.replace(/"/g, '&quot;')}" data-original="${char.replace(/"/g, '&quot;')}" ${disabledAttr}>`;
+                        html += `<input type="text" class="single-letter br-player-input${stateClass}" maxlength="1" value="${escapeStudentHtml(displayVal)}" data-original="${escapeStudentHtml(char)}" ${disabledAttr}>`;
                     } else {
                         const robotVal = revealAll ? char : '';
                         const robotClass = revealAll ? ' correct-answer' : '';
-                        html += `<input type="text" class="single-letter br-robot-input${robotClass}" maxlength="1" value="${robotVal.replace(/"/g, '&quot;')}" data-original="${char.replace(/"/g, '&quot;')}" disabled>`;
+                        html += `<input type="text" class="single-letter br-robot-input${robotClass}" maxlength="1" value="${escapeStudentHtml(robotVal)}" data-original="${escapeStudentHtml(char)}" disabled>`;
                     }
                     inputIdx++;
                 } else {
-                    html += `<span class="static-char">${char}</span>`;
+                    html += `<span class="static-char">${escapeStudentHtml(char)}</span>`;
                 }
             } else {
-                html += `<span class="punctuation">${char}</span>`;
+                html += `<span class="punctuation">${escapeStudentHtml(char)}</span>`;
             }
         }
         html += '</div>';
@@ -432,7 +453,7 @@ async function loadStudentTask(assignmentId) {
 
             let refHtml = '<table style="width:100%; border-collapse:collapse;"><thead><tr><th>Target Language</th><th>English Translation</th></tr></thead><tbody>';
             perActSentences['study'].forEach(s => {
-                refHtml += `<tr><td><b>${s.t}</b></td><td>${s.tr}</td></tr>`;
+                refHtml += `<tr><td><b>${escapeStudentHtml(s.t)}</b></td><td>${escapeStudentHtml(s.tr)}</td></tr>`;
             });
             refHtml += '</tbody></table>';
 
@@ -449,6 +470,28 @@ async function loadStudentTask(assignmentId) {
 
         if (currentUser && currentUser.email) {
             studentEmail = currentUser.email.toLowerCase();
+
+            // Check explicit email-based individual assignment restriction if present
+            if (
+                currentStudentAssignment.assigneeMode === 'INDIVIDUAL_STUDENTS' &&
+                Array.isArray(currentStudentAssignment.assignedStudentEmails) &&
+                currentStudentAssignment.assignedStudentEmails.length > 0 &&
+                !currentStudentAssignment.assignedStudentEmails.map(e => String(e).toLowerCase()).includes(studentEmail)
+            ) {
+                const exCard = document.getElementById('student-active-exercise-card');
+                const navActions = document.getElementById('student-nav-actions');
+                if (navActions) navActions.style.display = 'none';
+                if (exCard) {
+                    exCard.style.display = 'block';
+                    exCard.innerHTML = `
+                        <div style="text-align:center; padding:24px; color:#475569;">
+                            <h3 style="margin:0 0 8px 0; color:#0f172a;">Assignment Not Assigned</h3>
+                            <p style="margin:0;">This differentiated task was assigned to specific students and is not on your list.</p>
+                        </div>
+                    `;
+                }
+                return;
+            }
 
             // 1. Check if final submission already exists
             try {
@@ -640,7 +683,7 @@ function renderStudentMarksheetReview(sub) {
                     ${sub.overallGrade !== undefined ? sub.overallGrade : sub.totalEarned} / ${sub.totalPossible} (${sub.percentage}%)
                 </span>
             </div>
-            ${sub.teacherComment ? `<div style="background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #cbd5e1; max-width:300px;"><b>Teacher Comment:</b><br><i>"${sub.teacherComment}"</i></div>` : ''}
+            ${sub.teacherComment ? `<div style="background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #cbd5e1; max-width:300px;"><b>Teacher Comment:</b><br><i>"${escapeStudentHtml(sub.teacherComment)}"</i></div>` : ''}
         </div>
     `;
 
@@ -655,7 +698,7 @@ function renderStudentMarksheetReview(sub) {
             html += `
                 <div style="border:1px solid #cbd5e1; border-radius:8px; margin-bottom:15px; overflow:hidden; background:white;">
                     <div style="background:#f1f5f9; padding:10px 15px; font-weight:bold; color:#0f172a; border-bottom:1px solid #e2e8f0;">
-                        Exercise ${actIdx + 1}: ${act.activityTitle}
+                        Exercise ${actIdx + 1}: ${escapeStudentHtml(act.activityTitle)}
                     </div>
                     <div style="padding:12px;">
                         ${(act.responses || []).map((r, i) => {
@@ -664,16 +707,16 @@ function renderStudentMarksheetReview(sub) {
                             return `
                             <div style="padding:8px 0; border-bottom:1px solid #f1f5f9; display:flex; justify-content:space-between; align-items:center;">
                                 <div style="flex:1;">
-                                    <div><b>${i + 1}. Prompt:</b> ${r.prompt}</div>
+                                    <div><b>${i + 1}. Prompt:</b> ${escapeStudentHtml(r.prompt)}</div>
                                     <div style="color:${itemPoints >= 1 ? '#10b981' : (itemPoints > 0 ? '#d97706' : '#ef4444')}; margin-top:2px;">
-                                        <b>Your Answer:</b> ${r.studentAnswer}
+                                        <b>Your Answer:</b> ${escapeStudentHtml(r.studentAnswer)}
                                         ${showMistakeBadge ? `
                                             <span style="display:inline-block; margin-left:8px; font-size:11px; padding:2px 6px; border-radius:4px; font-weight:bold; background:${r.mistakes === 0 ? '#d1fae5' : '#fef3c7'}; color:${r.mistakes === 0 ? '#065f46' : '#92400e'};">
                                                 ${r.mistakes === 0 ? '✓' : `⚠️ ${r.mistakes} Mistake(s)`}
                                             </span>
                                         ` : ''}
                                     </div>
-                                    ${itemPoints < 1 ? `<div style="color:#2563eb; font-weight:bold; font-size:13px; margin-top:3px;"><b>Correct Answer:</b> ${r.correctAnswer}</div>` : ''}
+                                    ${itemPoints < 1 ? `<div style="color:#2563eb; font-weight:bold; font-size:13px; margin-top:3px;"><b>Correct Answer:</b> ${escapeStudentHtml(r.correctAnswer)}</div>` : ''}
                                 </div>
                                 <div style="font-weight:bold; color:${itemPoints >= 1 ? '#10b981' : (itemPoints > 0 ? '#d97706' : '#ef4444')}; padding-left:10px;">
                                     ${itemPoints} / 1 pt
@@ -693,6 +736,7 @@ function renderStudentMarksheetReview(sub) {
 function toggleReferenceTable() {
     const body = document.getElementById('ref-table-body');
     const icon = document.getElementById('ref-toggle-icon');
+    if (!body || !icon) return;
     if (body.style.display === 'none') {
         body.style.display = 'block';
         icon.innerText = '▲ Hide';
@@ -836,7 +880,9 @@ async function submitCurrentExercise() {
 
     saveStudentCurrentExerciseResponses();
     window.studentCompletedExercises[actType] = true;
-    await saveDraftProgress({ immediate: true });
+    if (typeof saveDraftProgress === 'function') {
+        await saveDraftProgress({ immediate: true });
+    }
     flushStudentTimeDelta();
     persistStudentTimeSnapshot(true);
     lockCurrentExerciseUI();
@@ -928,7 +974,6 @@ function selectSeededGapIndices(eligibleEntries, count, seedKey) {
         return seed / 4294967296;
     };
 
-    // Prioritize words with >= 2 characters first, then 1-character words if needed
     const longer = eligibleEntries.filter(e => e.clean.length >= 2);
     const shorter = eligibleEntries.filter(e => e.clean.length < 2);
 
@@ -954,7 +999,6 @@ function selectSeededGapIndices(eligibleEntries, count, seedKey) {
 function makeStudentGapHTML(text, itemIdx, actType, savedVal = '', savedGapValues = null) {
     if (!text) return { html: '', cleanGap: '', cleanGaps: [] };
 
-    // Handle multi-word / percentage removal (25%, 50%, 75%, 100%)
     if (STUDENT_MULTI_GAP_ACTIVITIES.includes(actType)) {
         const gapLevel = getActivityGapLevel(actType);
         if (gapLevel !== '1') {
@@ -969,7 +1013,7 @@ function makeStudentGapHTML(text, itemIdx, actType, savedVal = '', savedGapValue
                 .filter(entry => entry.clean.length > 0);
 
             if (wordEntries.length === 0) {
-                return { html: text, cleanGap: text, cleanGaps: [text] };
+                return { html: escapeStudentHtml(text), cleanGap: text, cleanGaps: [text] };
             }
 
             const pct = parseInt(gapLevel, 10);
@@ -985,7 +1029,7 @@ function makeStudentGapHTML(text, itemIdx, actType, savedVal = '', savedGapValue
             let gapCounter = 0;
 
             const renderedWords = words.map((w, wordIdx) => {
-                if (!chosenWordIndices.has(wordIdx)) return w;
+                if (!chosenWordIndices.has(wordIdx)) return escapeStudentHtml(w);
 
                 const leadingPunct = w.match(/^[^\p{L}\p{N}]+/u)?.[0] || '';
                 const trailingPunct = w.match(/[^\p{L}\p{N}]+$/u)?.[0] || '';
@@ -998,7 +1042,7 @@ function makeStudentGapHTML(text, itemIdx, actType, savedVal = '', savedGapValue
                 gapCounter++;
 
                 const boxWidth = Math.max(70, Math.min(180, clean.length * 14 + 24));
-                return `${leadingPunct}<input type="text" class="gap-inline-input" data-gap-idx="${gapCounter - 1}" data-correct="${clean.replace(/"/g, '&quot;')}" value="${(valForBox || '').replace(/"/g, '&quot;')}" style="padding:4px 8px; margin:3px 2px; border:2px solid #8b5cf6; border-radius:6px; font-weight:bold; font-size:20px; width:${boxWidth}px; text-align:center; outline:none; font-family:inherit; color:#1e293b; background:#fefce8; box-shadow:0 2px 4px rgba(0,0,0,0.05);" placeholder="...">${trailingPunct}`;
+                return `${escapeStudentHtml(leadingPunct)}<input type="text" class="gap-inline-input" data-gap-idx="${gapCounter - 1}" data-correct="${escapeStudentHtml(clean)}" value="${escapeStudentHtml(valForBox || '')}" style="padding:4px 8px; margin:3px 2px; border:2px solid #8b5cf6; border-radius:6px; font-weight:bold; font-size:20px; width:${boxWidth}px; text-align:center; outline:none; font-family:inherit; color:#1e293b; background:#fefce8; box-shadow:0 2px 4px rgba(0,0,0,0.05);" placeholder="...">${escapeStudentHtml(trailingPunct)}`;
             });
 
             return {
@@ -1030,7 +1074,7 @@ function makeStudentGapHTML(text, itemIdx, actType, savedVal = '', savedGapValue
             : words.map((w, i) => w.trim().length > 0 ? i : -1).filter(i => i !== -1);
 
         if (targetPool.length === 0) {
-            return { html: text, cleanGap: text, cleanGaps: [text] };
+            return { html: escapeStudentHtml(text), cleanGap: text, cleanGaps: [text] };
         }
 
         const selectedIndex = targetPool[itemIdx % targetPool.length];
@@ -1040,17 +1084,19 @@ function makeStudentGapHTML(text, itemIdx, actType, savedVal = '', savedGapValue
         const trailingPunct = selectedWord.match(/[^\p{L}\p{N}]+$/u)?.[0] || '';
         cleanGap = selectedWord.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '');
 
-        const inputHTML = `${leadingPunct}<input type="text" class="gap-inline-input" data-gap-idx="0" data-correct="${cleanGap.replace(/"/g, '&quot;')}" value="${(singleSavedVal || '').replace(/"/g, '&quot;')}" style="padding:4px 10px; border:2px solid #8b5cf6; border-radius:6px; font-weight:bold; font-size:20px; width:150px; text-align:center; outline:none; font-family:inherit; color:#1e293b; background:#fefce8; box-shadow:0 2px 4px rgba(0,0,0,0.05);" placeholder="Type word...">${trailingPunct}`;
+        const inputHTML = `${escapeStudentHtml(leadingPunct)}<input type="text" class="gap-inline-input" data-gap-idx="0" data-correct="${escapeStudentHtml(cleanGap)}" value="${escapeStudentHtml(singleSavedVal || '')}" style="padding:4px 10px; border:2px solid #8b5cf6; border-radius:6px; font-weight:bold; font-size:20px; width:150px; text-align:center; outline:none; font-family:inherit; color:#1e293b; background:#fefce8; box-shadow:0 2px 4px rgba(0,0,0,0.05);" placeholder="Type word...">${escapeStudentHtml(trailingPunct)}`;
 
-        words[selectedIndex] = inputHTML;
-        return { html: words.join(' '), cleanGap: cleanGap, cleanGaps: [cleanGap] };
+        const renderedWords = words.map((w, i) => (i === selectedIndex ? inputHTML : escapeStudentHtml(w)));
+        return { html: renderedWords.join(' '), cleanGap: cleanGap, cleanGaps: [cleanGap] };
     } else {
-        const inputHTML = `<input type="text" class="gap-inline-input" data-gap-idx="0" data-correct="${cleanGap.replace(/"/g, '&quot;')}" value="${(singleSavedVal || '').replace(/"/g, '&quot;')}" style="padding:4px 10px; border:2px solid #8b5cf6; border-radius:6px; font-weight:bold; font-size:20px; width:150px; text-align:center; outline:none; font-family:inherit; color:#1e293b; background:#fefce8; box-shadow:0 2px 4px rgba(0,0,0,0.05);" placeholder="Type word...">`;
-        return { html: text.replace(fullMatch, inputHTML), cleanGap: cleanGap, cleanGaps: [cleanGap] };
+        const inputHTML = `<input type="text" class="gap-inline-input" data-gap-idx="0" data-correct="${escapeStudentHtml(cleanGap)}" value="${escapeStudentHtml(singleSavedVal || '')}" style="padding:4px 10px; border:2px solid #8b5cf6; border-radius:6px; font-weight:bold; font-size:20px; width:150px; text-align:center; outline:none; font-family:inherit; color:#1e293b; background:#fefce8; box-shadow:0 2px 4px rgba(0,0,0,0.05);" placeholder="Type word...">`;
+        const splitParts = text.split(fullMatch);
+        const beforePart = escapeStudentHtml(splitParts[0] || '');
+        const afterPart = escapeStudentHtml(splitParts.slice(1).join(fullMatch));
+        return { html: `${beforePart}${inputHTML}${afterPart}`, cleanGap: cleanGap, cleanGaps: [cleanGap] };
     }
 }
 
-// Helper to update One-by-One submit button visibility based on input text
 function updateOneByOneSubmitVisibility() {
     checkOneByOneItemCompletion();
 }
@@ -1165,7 +1211,6 @@ function buildMissingDetailData(targetText, itemIdx) {
         return { visibleWords: [], removedWord: '', removedIdx: 0 };
     }
 
-    // Check if teacher explicitly marked a word with *word*
     let removedIdx = rawWords.findIndex(w => /\*[^*]+\*/.test(w));
 
     if (removedIdx === -1) {
@@ -1188,7 +1233,7 @@ function buildMissingDetailData(targetText, itemIdx) {
 }
 
 function renderCurrentStudentExercise() {
-    clearStudentOneByOneTimers();
+    if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 
     const container = document.getElementById('student-active-exercise-card');
@@ -1202,7 +1247,9 @@ function renderCurrentStudentExercise() {
     const actTitle = getCleanActivityTitle(actType, docLang);
     const actInstruction = getActivityInstruction(actType, docLang);
 
-    setupVirtualKeyboard(docLang, actType);
+    if (typeof setupVirtualKeyboard === 'function') {
+        setupVirtualKeyboard(docLang, actType);
+    }
 
     const sents = (currentStudentAssignment && currentStudentAssignment.sentencesPerActivity) 
         ? (currentStudentAssignment.sentencesPerActivity[actType] || []) 
@@ -1212,12 +1259,12 @@ function renderCurrentStudentExercise() {
 
     let html = `
         <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1.5px solid #e2e8f0; padding-bottom:8px; margin-bottom:12px;">
-            <h3 style="margin:0; font-size:17px; color:#0f172a;">Exercise ${studentCurrentExIndex + 1} of ${studentExerciseTypes.length}: ${actTitle}</h3>
+            <h3 style="margin:0; font-size:17px; color:#0f172a;">Exercise ${studentCurrentExIndex + 1} of ${studentExerciseTypes.length}: ${escapeStudentHtml(actTitle)}</h3>
             <span style="background:#e2e8f0; padding:3px 8px; border-radius:12px; font-weight:bold; color:#475569;">
                 ${sents.length} Items
             </span>
         </div>
-        <p style="color:#64748b; font-style:italic; font-size:13px; margin-top:0; margin-bottom:14px;">${actInstruction}</p>
+        <p style="color:#64748b; font-style:italic; font-size:13px; margin-top:0; margin-bottom:14px;">${escapeStudentHtml(actInstruction)}</p>
         <div id="exercise-interactive-area"></div>
     `;
 
@@ -1240,12 +1287,12 @@ function renderCurrentStudentExercise() {
         let mHtml = `
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; margin-top:10px;">
                 <div style="background:#f8fafc; padding:12px; border-radius:8px; border:1px solid #e2e8f0;">
-                    <h4 style="margin-top:0; margin-bottom:12px; font-size:15px; color:#1e293b; text-align:center; border-bottom:2px solid #3b82f6; padding-bottom:6px;">Column 1: ${docLang}</h4>
+                    <h4 style="margin-top:0; margin-bottom:12px; font-size:15px; color:#1e293b; text-align:center; border-bottom:2px solid #3b82f6; padding-bottom:6px;">Column 1: ${escapeStudentHtml(docLang)}</h4>
                     <div id="match-target-col" style="display:flex; flex-direction:column; gap:8px;">
                         ${shuffledTarget.map(item => {
                             const isMatched = preMatchedIds.has(String(item.id));
                             const mistakes = savedMatchResps[item.id]?.mistakes || 0;
-                            return `<div class="interactive-tile match-t-tile${isMatched ? ' correct-match' : ''}" data-id="${item.id}" data-wrong-attempts="${mistakes}" style="display:block; width:100%; text-align:left; padding:8px 12px; box-sizing:border-box;${isMatched ? ' opacity:0.3;' : ''}">${item.t}</div>`;
+                            return `<div class="interactive-tile match-t-tile${isMatched ? ' correct-match' : ''}" data-id="${item.id}" data-wrong-attempts="${mistakes}" style="display:block; width:100%; text-align:left; padding:8px 12px; box-sizing:border-box;${isMatched ? ' opacity:0.3;' : ''}">${escapeStudentHtml(item.t)}</div>`;
                         }).join('')}
                     </div>
                 </div>
@@ -1254,7 +1301,7 @@ function renderCurrentStudentExercise() {
                     <div id="match-eng-col" style="display:flex; flex-direction:column; gap:8px;">
                         ${shuffledEng.map(item => {
                             const isMatched = preMatchedIds.has(String(item.id));
-                            return `<div class="interactive-tile match-tr-tile${isMatched ? ' correct-match' : ''}" data-id="${item.id}" style="display:block; width:100%; text-align:left; padding:8px 12px; box-sizing:border-box;${isMatched ? ' opacity:0.3;' : ''}">${item.tr}</div>`;
+                            return `<div class="interactive-tile match-tr-tile${isMatched ? ' correct-match' : ''}" data-id="${item.id}" style="display:block; width:100%; text-align:left; padding:8px 12px; box-sizing:border-box;${isMatched ? ' opacity:0.3;' : ''}">${escapeStudentHtml(item.tr)}</div>`;
                         }).join('')}
                     </div>
                 </div>
@@ -1288,8 +1335,8 @@ function renderCurrentStudentExercise() {
         if (studentSubItemIndex >= sents.length) studentSubItemIndex = 0;
         const currentSent = sents[studentSubItemIndex] || { t: '', tr: '' };
         const targetText = currentSent.t || '';
-        const englishText = cleanEnglishText(currentSent.tr || '');
-        const safeTarget = targetText.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const englishText = typeof cleanEnglishText === 'function' ? cleanEnglishText(currentSent.tr || '') : (currentSent.tr || '');
+        const escapedSpeakAttr = escapeStudentHtml(targetText);
         const savedVal = getCleanSavedStudentAnswer(actType, studentSubItemIndex);
 
         let cardContentHTML = '';
@@ -1300,7 +1347,7 @@ function renderCurrentStudentExercise() {
             const gapObj = makeStudentGapHTML(englishText, studentSubItemIndex, 'listen-trad', savedVal, savedGapValues);
             cardContentHTML = `
                 <div style="text-align:center; padding:20px 0;">
-                    <button type="button" onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:25px; cursor:pointer;">🔊 Listen Audio</button>
+                    <button type="button" data-speak="${escapedSpeakAttr}" onclick="speakTL(this.dataset.speak)" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:25px; cursor:pointer;">🔊 Listen Audio</button>
                     <div style="font-size:26px; font-weight:bold; color:#1e293b; margin-bottom:20px; line-height:1.8;">${gapObj.html}</div>
                 </div>`;
             setTimeout(() => speakTL(targetText), 200);
@@ -1311,7 +1358,7 @@ function renderCurrentStudentExercise() {
             const gapObj = makeStudentGapHTML(targetText, studentSubItemIndex, 'listen-dictation', savedVal, savedGapValues);
             cardContentHTML = `
                 <div style="text-align:center; padding:20px 0;">
-                    <button type="button" onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:25px; cursor:pointer;">🔊 Listen Audio</button>
+                    <button type="button" data-speak="${escapedSpeakAttr}" onclick="speakTL(this.dataset.speak)" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:25px; cursor:pointer;">🔊 Listen Audio</button>
                     <div style="font-size:26px; font-weight:bold; color:#1e293b; margin-bottom:20px; line-height:1.8;">${gapObj.html}</div>
                 </div>`;
             setTimeout(() => speakTL(targetText), 200);
@@ -1330,7 +1377,7 @@ function renderCurrentStudentExercise() {
             const makeSlotHTML = (slotIdx) => {
                 if (isAlreadySolved) {
                     if (slotIdx === removedIdx) {
-                        return `<span style="display:inline-block; padding:2px 10px; margin:0 2px; background:#dcfce7; border:2px solid #10b981; border-radius:6px; color:#065f46; font-weight:700;">${removedWord}</span>`;
+                        return `<span style="display:inline-block; padding:2px 10px; margin:0 2px; background:#dcfce7; border:2px solid #10b981; border-radius:6px; color:#065f46; font-weight:700;">${escapeStudentHtml(removedWord)}</span>`;
                     }
                     return '';
                 }
@@ -1339,7 +1386,7 @@ function renderCurrentStudentExercise() {
 
             let sentenceWithSlotsHTML = makeSlotHTML(0);
             visibleWords.forEach((word, wIdx) => {
-                sentenceWithSlotsHTML += `<span style="font-weight:700;">${word}</span>${makeSlotHTML(wIdx + 1)}`;
+                sentenceWithSlotsHTML += `<span style="font-weight:700;">${escapeStudentHtml(word)}</span>${makeSlotHTML(wIdx + 1)}`;
             });
 
             cardContentHTML = `
@@ -1348,14 +1395,14 @@ function renderCurrentStudentExercise() {
                     data-missing-solved="${isAlreadySolved ? 'true' : 'false'}"
                     data-wrong-attempts="${savedResp?.mistakes || 0}"
                     data-removed-idx="${removedIdx}"
-                    data-removed-word="${removedWord.replace(/"/g, '&quot;')}"
+                    data-removed-word="${escapeStudentHtml(removedWord)}"
                     style="text-align:center; padding:16px 0;">
-                    <button type="button" onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:24px; cursor:pointer;">🔊 Listen Audio</button>
+                    <button type="button" data-speak="${escapedSpeakAttr}" onclick="speakTL(this.dataset.speak)" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:24px; cursor:pointer;">🔊 Listen Audio</button>
                     <div class="missing-detail-sentence" style="font-size:25px; color:#1e293b; line-height:2.0; display:flex; flex-wrap:wrap; justify-content:center; align-items:center; column-gap:8px; row-gap:4px;">
                         ${sentenceWithSlotsHTML}
                     </div>
                     <div id="missing-detail-feedback" style="min-height:24px; font-weight:bold; font-size:15px; margin-top:16px; color:${isAlreadySolved ? '#10b981' : '#64748b'};">
-                        ${isAlreadySolved ? `✅ Correct! Missing word: "${removedWord}"` : ''}
+                        ${isAlreadySolved ? `✅ Correct! Missing word: "${escapeStudentHtml(removedWord)}"` : ''}
                     </div>
                 </div>
             `;
@@ -1374,18 +1421,18 @@ function renderCurrentStudentExercise() {
                 bankWords = remaining;
             }
             const promptHeaderHTML = (actType === 'listen-jumbled')
-                ? `<button type="button" onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:22px; cursor:pointer;">🔊 Listen Audio</button>`
-                : `<p style="margin:0 0 18px 0; font-weight:bold; color:#0f172a; font-size:24px;">${englishText}</p>`;
+                ? `<button type="button" data-speak="${escapedSpeakAttr}" onclick="speakTL(this.dataset.speak)" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:22px; cursor:pointer;">🔊 Listen Audio</button>`
+                : `<p style="margin:0 0 18px 0; font-weight:bold; color:#0f172a; font-size:24px;">${escapeStudentHtml(englishText)}</p>`;
 
             cardContentHTML = `
                 <div class="student-item-block" data-idx="${studentSubItemIndex}" style="text-align:center; padding:10px 0;">
                     ${promptHeaderHTML}
                     <div style="display:flex; flex-direction:column; gap:16px; align-items:center;">
                         <div class="jumble-answer-slot">
-                            ${slotWords.map(w => `<span class="interactive-tile jumble-word-tile">${w}</span>`).join('')}
+                            ${slotWords.map(w => `<span class="interactive-tile jumble-word-tile">${escapeStudentHtml(w)}</span>`).join('')}
                         </div>
                         <div class="jumble-word-bank" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:center; align-items:center;">
-                            ${bankWords.map(w => `<span class="interactive-tile jumble-word-tile">${w}</span>`).join('')}
+                            ${bankWords.map(w => `<span class="interactive-tile jumble-word-tile">${escapeStudentHtml(w)}</span>`).join('')}
                         </div>
                     </div>
                 </div>
@@ -1419,14 +1466,14 @@ function renderCurrentStudentExercise() {
                         return `<span class='space-span' data-space-idx='${currentSpaceIdx}' onclick='check_nospace_click(event, this, ${studentSubItemIndex})'><span class='space-inner${revealedClass}' style='${displayStyle}'>&nbsp;</span></span>`;
                     }
                 } else {
-                    return `<span class='letter-span' data-index='${charIdx}' onclick='check_nospace_click(event, this, ${studentSubItemIndex})'>${char}</span>`;
+                    return `<span class='letter-span' data-index='${charIdx}' onclick='check_nospace_click(event, this, ${studentSubItemIndex})'>${escapeStudentHtml(char)}</span>`;
                 }
             }).join('');
 
             cardContentHTML = `
                 <div class="student-item-block" data-idx="${studentSubItemIndex}" data-wrong-clicks="${savedResp?.mistakes || 0}" style="text-align:center; padding:10px 0;">
                     <div style="display:flex; justify-content:center; align-items:center; gap:15px; margin-bottom:16px;">
-                        <p style="margin:0; font-weight:bold; color:#0f172a; font-size:24px;">${englishText}</p>
+                        <p style="margin:0; font-weight:bold; color:#0f172a; font-size:24px;">${escapeStudentHtml(englishText)}</p>
                         <span class="space-counter-badge" style="font-size:15px; font-weight:bold; color:#2563eb;">(${spaceCount} space${spaceCount === 1 ? '' : 's'} remaining)</span>
                     </div>
                     <div class="no-spaces-interactive-line">
@@ -1444,18 +1491,30 @@ function renderCurrentStudentExercise() {
             const words = targetText.split(' ');
             let lettersHTML = '';
 
+            // Count matching characters so short words with 0 vowels/consonants still generate playable boxes
+            let matchingLetterCount = 0;
+            words.forEach(word => {
+                for (let i = 0; i < word.length; i++) {
+                    if (regex.test(word[i])) matchingLetterCount++;
+                }
+            });
+
             words.forEach((word, wIdx) => {
                 for (let i = 0; i < word.length; i++) {
                     const char = word[i];
-                    if (regex.test(char)) {
+                    const shouldMakeBox = matchingLetterCount > 0
+                        ? regex.test(char)
+                        : /\p{L}/u.test(char);
+
+                    if (shouldMakeBox) {
                         const prevChar = savedLetters[boxIdx] || '';
                         const statusClass = prevChar
                             ? (prevChar.toLowerCase() === char.toLowerCase() ? ' correct-input' : ' wrong-input')
                             : '';
-                        lettersHTML += `<input type="text" class="letter-box ${isVowels ? 'vowel-input' : 'cons-input'}${statusClass}" maxlength="1" value="${prevChar.replace(/"/g, '&quot;')}" data-correct="${char.toLowerCase()}" data-item="${studentSubItemIndex}">`;
+                        lettersHTML += `<input type="text" class="letter-box ${isVowels ? 'vowel-input' : 'cons-input'}${statusClass}" maxlength="1" value="${escapeStudentHtml(prevChar)}" data-correct="${escapeStudentHtml(char.toLowerCase())}" data-item="${studentSubItemIndex}">`;
                         boxIdx++;
                     } else {
-                        lettersHTML += `<span style="font-weight:600;">${char}</span>`;
+                        lettersHTML += `<span style="font-weight:600;">${escapeStudentHtml(char)}</span>`;
                     }
                 }
                 if (wIdx < words.length - 1) {
@@ -1465,7 +1524,7 @@ function renderCurrentStudentExercise() {
 
             cardContentHTML = `
                 <div class="student-item-block" data-idx="${studentSubItemIndex}" style="text-align:center; padding:10px 0;">
-                    <p style="margin:0 0 18px 0; font-weight:bold; color:#0f172a; font-size:24px;">${englishText}</p>
+                    <p style="margin:0 0 18px 0; font-weight:bold; color:#0f172a; font-size:24px;">${escapeStudentHtml(englishText)}</p>
                     <div style="font-size:26px; line-height:2.2; justify-content:center; display:flex; flex-wrap:wrap; align-items:center;">
                         ${lettersHTML}
                     </div>
@@ -1478,11 +1537,12 @@ function renderCurrentStudentExercise() {
             const promptLabel = isTarget ? englishText : targetText;
             let { fullMatch, cleanGap } = extractGapWord(fullSentence);
 
-            let displaySentence = fullSentence;
+            let displaySentence = '';
             const safeSaved = (savedVal && savedVal !== '(Empty)') ? savedVal : '';
             if (fullMatch && cleanGap) {
-                const inputHtml = `<input type="text" class="gap-inline-input" data-correct="${cleanGap.replace(/"/g, '&quot;')}" value="${safeSaved.replace(/"/g, '&quot;')}" style="padding:4px 8px; border:2px solid #cbd5e1; border-radius:6px; font-weight:bold; font-size:22px; width:160px; margin:0 4px; text-align:center;">`;
-                displaySentence = displaySentence.replace(fullMatch, inputHtml);
+                const inputHtml = `<input type="text" class="gap-inline-input" data-correct="${escapeStudentHtml(cleanGap)}" value="${escapeStudentHtml(safeSaved)}" style="padding:4px 8px; border:2px solid #cbd5e1; border-radius:6px; font-weight:bold; font-size:22px; width:160px; margin:0 4px; text-align:center;">`;
+                const parts = fullSentence.split(fullMatch);
+                displaySentence = `${escapeStudentHtml(parts[0] || '')}${inputHtml}${escapeStudentHtml(parts.slice(1).join(fullMatch))}`;
             } else {
                 const fallbackGap = makeStudentGapHTML(fullSentence, studentSubItemIndex, actType, safeSaved);
                 displaySentence = fallbackGap.html;
@@ -1490,7 +1550,7 @@ function renderCurrentStudentExercise() {
 
             cardContentHTML = `
                 <div class="student-item-block" data-idx="${studentSubItemIndex}" style="text-align:center; padding:10px 0;">
-                    <p style="margin:0 0 16px 0; font-weight:bold; color:#64748b; font-size:18px;">Prompt: ${promptLabel}</p>
+                    <p style="margin:0 0 16px 0; font-weight:bold; color:#64748b; font-size:18px;">Prompt: ${escapeStudentHtml(promptLabel)}</p>
                     <div style="font-size:26px; font-weight:bold; color:#0f172a; line-height:1.6;">
                         ${displaySentence}
                     </div>
@@ -1498,7 +1558,7 @@ function renderCurrentStudentExercise() {
             `;
         }
         else if (actType === 'faulty' || actType === 'listen-faulty') {
-            const faultyText = currentSent.faultyTr || getOrGenerateFaultyTr(currentSent);
+            const faultyText = currentSent.faultyTr || (typeof getOrGenerateFaultyTr === 'function' ? getOrGenerateFaultyTr(currentSent) : englishText);
             const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
             const isAlreadySolved = !!(savedResp && savedResp.isDone);
             const { faultyTokens, correctTokens, wrongIndices, correctedIndices } = getFaultyWordDiff(faultyText, englishText);
@@ -1508,7 +1568,7 @@ function renderCurrentStudentExercise() {
                 const solvedStyle = (isAlreadySolved && isWrongWord)
                     ? 'background:#fee2e2; border-color:#ef4444; color:#b91c1c; text-decoration:line-through;'
                     : '';
-                return `<span class="interactive-tile jumble-word-tile faulty-word-tile" data-word-idx="${idx}" style="${solvedStyle}">${w}</span>`;
+                return `<span class="interactive-tile jumble-word-tile faulty-word-tile" data-word-idx="${idx}" style="${solvedStyle}">${escapeStudentHtml(w)}</span>`;
             }).join('');
 
             const correctTilesHTML = correctTokens.map((w, idx) => {
@@ -1516,19 +1576,19 @@ function renderCurrentStudentExercise() {
                 const highlightStyle = isCorrectedWord
                     ? 'background:#dcfce7; border-color:#10b981; color:#065f46; font-weight:700;'
                     : 'background:#f8fafc; border-color:#cbd5e1; color:#0f172a;';
-                return `<span class="interactive-tile jumble-word-tile faulty-correct-tile" style="cursor:default; ${highlightStyle}">${w}</span>`;
+                return `<span class="interactive-tile jumble-word-tile faulty-correct-tile" style="cursor:default; ${highlightStyle}">${escapeStudentHtml(w)}</span>`;
             }).join('');
 
             const faultyHeaderHTML = (actType === 'listen-faulty')
-                ? `<button type="button" onclick="speakTL('${safeTarget}')" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:22px; cursor:pointer;">🔊 Listen Audio</button>`
-                : `<p style="margin:0 0 18px 0; font-weight:bold; color:#0f172a; font-size:24px;">${targetText}</p>`;
+                ? `<button type="button" data-speak="${escapedSpeakAttr}" onclick="speakTL(this.dataset.speak)" class="btn-purple" style="font-size:18px; padding:12px 28px; margin-bottom:22px; cursor:pointer;">🔊 Listen Audio</button>`
+                : `<p style="margin:0 0 18px 0; font-weight:bold; color:#0f172a; font-size:24px;">${escapeStudentHtml(targetText)}</p>`;
 
             cardContentHTML = `
                 <div class="student-item-block"
                     data-idx="${studentSubItemIndex}"
                     data-faulty-solved="${isAlreadySolved ? 'true' : 'false'}"
                     data-wrong-attempts="${savedResp?.mistakes || 0}"
-                    data-clicked-word="${(savedResp?.clickedWord || '').replace(/"/g, '&quot;')}"
+                    data-clicked-word="${escapeStudentHtml(savedResp?.clickedWord || '')}"
                     data-clicked-idx="${savedResp?.clickedIdx !== undefined ? savedResp.clickedIdx : -1}"
                     data-wrong-indices="${wrongIndices.join(',')}"
                     style="text-align:center; padding:10px 0;">
@@ -1561,7 +1621,7 @@ function renderCurrentStudentExercise() {
             cardContentHTML = `
                 <div class="student-item-block beat-robot-block"
                     data-idx="${studentSubItemIndex}"
-                    data-correct="${targetText.replace(/"/g, '&quot;')}"
+                    data-correct="${escapeStudentHtml(targetText)}"
                     data-robot-done="${isAlreadyDone ? 'true' : 'false'}"
                     data-robot-won="${didWin ? 'true' : 'false'}"
                     data-wrong-attempts="${savedResp?.mistakes || 0}"
@@ -1571,7 +1631,7 @@ function renderCurrentStudentExercise() {
                             <h2 class="br-panel-title">You</h2>
                             <div class="br-source-container">
                                 <div class="br-source-label">Translate this:</div>
-                                <div class="br-source-sentence">${englishText}</div>
+                                <div class="br-source-sentence">${escapeStudentHtml(englishText)}</div>
                             </div>
                             <div class="br-question-container">${playerBoardHTML}</div>
                             <div class="br-status-overlay${isAlreadyDone && didWin ? ' visible' : ''}">You Win!</div>
@@ -1580,7 +1640,7 @@ function renderCurrentStudentExercise() {
                             <h2 class="br-panel-title">Robot</h2>
                             <div class="br-source-container">
                                 <div class="br-source-label">Translate this:</div>
-                                <div class="br-source-sentence">${englishText}</div>
+                                <div class="br-source-sentence">${escapeStudentHtml(englishText)}</div>
                             </div>
                             <div class="br-question-container">${robotBoardHTML}</div>
                             <div class="br-status-overlay${isAlreadyDone && !didWin ? ' visible' : ''}">Robot Wins!</div>
@@ -1594,19 +1654,19 @@ function renderCurrentStudentExercise() {
             let answerRef = '';
 
             if (actType === 'trans-en') {
-                promptText = `<span style="font-size:24px; font-weight:bold; color:#0f172a;">${targetText}</span>`;
+                promptText = `<span style="font-size:24px; font-weight:bold; color:#0f172a;">${escapeStudentHtml(targetText)}</span>`;
                 answerRef = englishText;
             } else if (actType === 'trans-target') {
-                promptText = `<span style="font-size:24px; font-weight:bold; color:#0f172a;">${englishText}</span>`;
+                promptText = `<span style="font-size:24px; font-weight:bold; color:#0f172a;">${escapeStudentHtml(englishText)}</span>`;
                 answerRef = targetText;
             }
 
             const safeSaved = (savedVal && savedVal !== '(Empty)') ? savedVal : '';
 
             cardContentHTML = `
-                <div class="student-item-block" data-idx="${studentSubItemIndex}" data-correct="${answerRef.replace(/"/g, '&quot;')}" style="text-align:center; padding:10px 0;">
+                <div class="student-item-block" data-idx="${studentSubItemIndex}" data-correct="${escapeStudentHtml(answerRef)}" style="text-align:center; padding:10px 0;">
                     <div style="margin-bottom:20px;">${promptText}</div>
-                    <input type="text" class="full-typing-input" value="${safeSaved.replace(/"/g, '&quot;')}" placeholder="Type answer here..." style="width:80%; max-width:500px; padding:10px 14px; border:2px solid #cbd5e1; border-radius:8px; font-size:20px; text-align:center; box-sizing:border-box;">
+                    <input type="text" class="full-typing-input" value="${escapeStudentHtml(safeSaved)}" placeholder="Type answer here..." style="width:80%; max-width:500px; padding:10px 14px; border:2px solid #cbd5e1; border-radius:8px; font-size:20px; text-align:center; box-sizing:border-box;">
                 </div>
             `;
         }
@@ -1758,10 +1818,9 @@ function renderCurrentStudentExercise() {
                         if (clickedSlotIdx === removedIdx) {
                             block.dataset.missingSolved = 'true';
 
-                            // Reveal the missing word in the clicked slot and remove remaining boxes
                             area.querySelectorAll('.missing-detail-slot').forEach(s => {
                                 if (s === this) {
-                                    s.outerHTML = `<span style="display:inline-block; padding:2px 10px; margin:0 2px; background:#dcfce7; border:2px solid #10b981; border-radius:6px; color:#065f46; font-weight:700;">${removedWord}</span>`;
+                                    s.outerHTML = `<span style="display:inline-block; padding:2px 10px; margin:0 2px; background:#dcfce7; border:2px solid #10b981; border-radius:6px; color:#065f46; font-weight:700;">${escapeStudentHtml(removedWord)}</span>`;
                                 } else {
                                     s.remove();
                                 }
@@ -1860,7 +1919,7 @@ function renderCurrentStudentExercise() {
 
 function navigateOneByOneItem(direction) {
     if (!window.isTeacherPreview && direction < 0) return;
-    clearStudentOneByOneTimers();
+    if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
 
     // Save student answer for the current item before moving
     saveStudentCurrentExerciseResponses();
@@ -1873,7 +1932,9 @@ function navigateOneByOneItem(direction) {
     if (studentSubItemIndex >= sents.length) studentSubItemIndex = sents.length - 1;
 
     if (!window.isTeacherPreview) {
-        saveDraftProgress({ immediate: false });
+        if (typeof saveDraftProgress === 'function') {
+            saveDraftProgress({ immediate: false });
+        }
         flushStudentTimeDelta();
         persistStudentTimeSnapshot(false);
     }
@@ -1884,7 +1945,7 @@ function runStudentDelayedDictation(targetText, itemIdx) {
     const existingInputs = Array.from(document.querySelectorAll('#dd-student-stage .gap-inline-input'));
     const preservedGapValues = existingInputs.length > 0 ? existingInputs.map(i => i.value) : null;
 
-    clearStudentOneByOneTimers();
+    if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 
     const stageEl = document.getElementById('dd-student-stage');
@@ -1896,7 +1957,6 @@ function runStudentDelayedDictation(targetText, itemIdx) {
     const savedVal = (savedResp?.studentAnswer && savedResp.studentAnswer !== '(Empty)')
         ? savedResp.studentAnswer
         : '';
-    const safeTarget = targetText.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
     stageEl.innerHTML = `
         <div style="text-align:center; padding:15px 0;">
@@ -1906,8 +1966,12 @@ function runStudentDelayedDictation(targetText, itemIdx) {
         </div>
     `;
 
-    // Stage 1: Play TTS Audio
-    speakTL(targetText, () => {
+    let countdownStarted = false;
+    const startMemoryCountdown = () => {
+        if (countdownStarted) return;
+        countdownStarted = true;
+        if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
+
         // Stage 2: 3-Second Memory Delay
         let count = 3;
         const statusText = document.getElementById('dd-status-text');
@@ -1918,22 +1982,26 @@ function runStudentDelayedDictation(targetText, itemIdx) {
             if (count > 0) {
                 if (statusText) statusText.innerHTML = `🧠 Memorise! <span style="font-size:28px; color:#d97706;">${count}</span>s`;
             } else {
-                clearStudentOneByOneTimers();
+                if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
                 // Stage 3: Display TL sentence with missing word input box(es) (re-attempt hidden for 15s)
                 const gapObj = makeStudentGapHTML(targetText, itemIdx, 'delayed-dictation', savedVal, savedGapValues);
                 if (statusText) {
                     statusText.style.color = '#1e293b';
                     statusText.innerHTML = `
                         <div style="margin-bottom:15px; line-height:1.8;">${gapObj.html}</div>
-                        <button type="button" id="dd-reattempt-btn" onclick="runStudentDelayedDictation('${safeTarget}', ${itemIdx})" class="btn-outline" style="display:none; font-size:13px; margin-top:10px;">🔁 Try Again</button>
+                        <button type="button" id="dd-reattempt-btn" class="btn-outline" style="display:none; font-size:13px; margin-top:10px;">🔁 Try Again</button>
                     `;
+                    const reBtn = document.getElementById('dd-reattempt-btn');
+                    if (reBtn) {
+                        reBtn.onclick = () => runStudentDelayedDictation(targetText, itemIdx);
+                    }
                 }
 
                 const revealTimer = setTimeout(() => {
                     const reBtn = document.getElementById('dd-reattempt-btn');
                     if (reBtn) reBtn.style.display = 'inline-block';
                 }, 15000);
-                studentOneByOneTimers.push(revealTimer);
+                if (Array.isArray(studentOneByOneTimers)) studentOneByOneTimers.push(revealTimer);
 
                 const inputs = statusText ? Array.from(statusText.querySelectorAll('.gap-inline-input')) : [];
                 if (inputs.length > 0) {
@@ -1951,15 +2019,23 @@ function runStudentDelayedDictation(targetText, itemIdx) {
                 }
             }
         }, 1000);
-        studentOneByOneTimers.push(timer);
-    });
+        if (Array.isArray(studentOneByOneTimers)) studentOneByOneTimers.push(timer);
+    };
+
+    // Fallback safety timer in case Web Speech API onend fails to fire
+    const fallbackAudioMs = Math.max(3500, (targetText || '').length * 115 + 1500);
+    const audioFallbackTimer = setTimeout(startMemoryCountdown, fallbackAudioMs);
+    if (Array.isArray(studentOneByOneTimers)) studentOneByOneTimers.push(audioFallbackTimer);
+
+    // Stage 1: Play TTS Audio
+    speakTL(targetText, startMemoryCountdown);
 }
 
 function runStudentDelayedCopying(targetText, itemIdx) {
     const existingInputs = Array.from(document.querySelectorAll('#dc-student-stage .gap-inline-input'));
     const preservedGapValues = existingInputs.length > 0 ? existingInputs.map(i => i.value) : null;
 
-    clearStudentOneByOneTimers();
+    if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 
     const stageEl = document.getElementById('dc-student-stage');
@@ -1971,7 +2047,6 @@ function runStudentDelayedCopying(targetText, itemIdx) {
     const savedVal = (savedResp?.studentAnswer && savedResp.studentAnswer !== '(Empty)')
         ? savedResp.studentAnswer
         : '';
-    const safeTarget = targetText.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
     // Stage 1: Display TL Sentence for 7 seconds
     let phase1Count = 7;
@@ -1981,7 +2056,7 @@ function runStudentDelayedCopying(targetText, itemIdx) {
                 ⏳ Disappearing in: <span id="dc-sec" style="font-size:20px;">${phase1Count}</span>s
             </div>
             <div id="dc-display-text" style="font-size:24px; font-weight:bold; color:#1e293b; margin-top:10px;">
-                ${targetText}
+                ${escapeStudentHtml(targetText)}
             </div>
         </div>
     `;
@@ -1992,7 +2067,7 @@ function runStudentDelayedCopying(targetText, itemIdx) {
         if (phase1Count > 0) {
             if (secSpan) secSpan.innerText = phase1Count;
         } else {
-            clearStudentOneByOneTimers();
+            if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
 
             // Stage 2: 3-Second Memory Delay
             let phase2Count = 3;
@@ -2013,23 +2088,27 @@ function runStudentDelayedCopying(targetText, itemIdx) {
                 if (phase2Count > 0) {
                     if (statusText) statusText.innerHTML = `🧠 Memorise! <span style="font-size:28px; color:#d97706;">${phase2Count}</span>s`;
                 } else {
-                    clearStudentOneByOneTimers();
+                    if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
                     // Stage 3: Display TL sentence with missing word input box(es) (re-attempt hidden for 15s)
                     const gapObj = makeStudentGapHTML(targetText, itemIdx, 'delayed-copying', savedVal, savedGapValues);
                     if (container) {
                         container.innerHTML = `
                             <div style="text-align:center; padding:15px 0;">
                                 <div style="font-size:22px; font-weight:bold; color:#1e293b; margin-bottom:15px; line-height:1.8;">${gapObj.html}</div>
-                                <button type="button" id="dc-reattempt-btn" onclick="runStudentDelayedCopying('${safeTarget}', ${itemIdx})" class="btn-outline" style="display:none; font-size:13px; margin-top:10px;">🔁 Try Again</button>
+                                <button type="button" id="dc-reattempt-btn" class="btn-outline" style="display:none; font-size:13px; margin-top:10px;">🔁 Try Again</button>
                             </div>
                         `;
+                        const reBtn = document.getElementById('dc-reattempt-btn');
+                        if (reBtn) {
+                            reBtn.onclick = () => runStudentDelayedCopying(targetText, itemIdx);
+                        }
                     }
 
                     const revealTimer = setTimeout(() => {
                         const reBtn = document.getElementById('dc-reattempt-btn');
                         if (reBtn) reBtn.style.display = 'inline-block';
                     }, 15000);
-                    studentOneByOneTimers.push(revealTimer);
+                    if (Array.isArray(studentOneByOneTimers)) studentOneByOneTimers.push(revealTimer);
 
                     const inputs = container ? Array.from(container.querySelectorAll('.gap-inline-input')) : [];
                     if (inputs.length > 0) {
@@ -2047,14 +2126,14 @@ function runStudentDelayedCopying(targetText, itemIdx) {
                     }
                 }
             }, 1000);
-            studentOneByOneTimers.push(timer2);
+            if (Array.isArray(studentOneByOneTimers)) studentOneByOneTimers.push(timer2);
         }
     }, 1000);
-    studentOneByOneTimers.push(timer1);
+    if (Array.isArray(studentOneByOneTimers)) studentOneByOneTimers.push(timer1);
 }
 
 function runStudentBeatTheRobot(targetText, itemIdx) {
-    clearStudentOneByOneTimers();
+    if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
 
     const area = document.getElementById('exercise-interactive-area');
     const block = area ? area.querySelector('.beat-robot-block') : null;
@@ -2066,7 +2145,15 @@ function runStudentBeatTheRobot(targetText, itemIdx) {
     const robotOverlay = block.querySelector('.br-computer .br-status-overlay');
 
     const speedCfg = getBeatRobotSpeedConfig();
-    const stepMs = speedCfg.msPerChar ? Math.max(600, Math.round(speedCfg.msPerChar * 8.1)) : 1500;
+    let stepMs = 1500;
+    if (speedCfg.stepIntervalMs) {
+        stepMs = Math.max(400, speedCfg.stepIntervalMs);
+    } else if (speedCfg.fixedDurationMs && robotInputs.length > 0) {
+        stepMs = Math.max(300, Math.round(speedCfg.fixedDurationMs / robotInputs.length));
+    } else if (speedCfg.msPerChar) {
+        stepMs = Math.max(600, Math.round(speedCfg.msPerChar * 8.1));
+    }
+
     const startTime = performance.now();
     let gameInProgress = true;
     let robotInterval = null;
@@ -2078,7 +2165,7 @@ function runStudentBeatTheRobot(targetText, itemIdx) {
             clearInterval(robotInterval);
             robotInterval = null;
         }
-        clearStudentOneByOneTimers();
+        if (typeof clearStudentOneByOneTimers === 'function') clearStudentOneByOneTimers();
 
         const elapsedMs = Math.round(performance.now() - startTime);
         block.dataset.robotDone = 'true';
@@ -2109,6 +2196,11 @@ function runStudentBeatTheRobot(targetText, itemIdx) {
         checkExerciseCompletion();
     };
 
+    if (playerInputs.length === 0) {
+        settleRound(true);
+        return;
+    }
+
     playerInputs.forEach((input, index) => {
         input.addEventListener('focus', () => {
             activeInputForVK = input;
@@ -2123,7 +2215,6 @@ function runStudentBeatTheRobot(targetText, itemIdx) {
                 input.classList.remove('wrong-answer');
                 input.classList.add('correct-answer');
 
-                // Advance to the next incomplete letter box
                 let nextIdx = index + 1;
                 while (nextIdx < playerInputs.length && playerInputs[nextIdx].classList.contains('correct-answer')) {
                     nextIdx++;
@@ -2157,15 +2248,12 @@ function runStudentBeatTheRobot(targetText, itemIdx) {
         });
     });
 
-    if (playerInputs.length > 0) {
-        setTimeout(() => {
-            const firstIncomplete = playerInputs.find(inp => !inp.classList.contains('correct-answer')) || playerInputs[0];
-            firstIncomplete.focus();
-            activeInputForVK = firstIncomplete;
-        }, 20);
-    }
+    setTimeout(() => {
+        const firstIncomplete = playerInputs.find(inp => !inp.classList.contains('correct-answer')) || playerInputs[0];
+        firstIncomplete.focus();
+        activeInputForVK = firstIncomplete;
+    }, 20);
 
-    // Robot types one missing vowel/consonant per interval tick so the student sees it live
     let robotIdx = 0;
     robotInterval = setInterval(() => {
         if (!gameInProgress || !document.body.contains(block)) {
@@ -2182,7 +2270,7 @@ function runStudentBeatTheRobot(targetText, itemIdx) {
         }
     }, stepMs);
 
-    studentOneByOneTimers.push(robotInterval);
+    if (Array.isArray(studentOneByOneTimers)) studentOneByOneTimers.push(robotInterval);
 }
 
 /* =========================
@@ -2190,6 +2278,9 @@ function runStudentBeatTheRobot(targetText, itemIdx) {
 ========================= */
 function check_nospace_click(e, element, itemIdx) {
     if (e) e.stopPropagation();
+    const actType = studentExerciseTypes[studentCurrentExIndex];
+    if (window.studentCompletedExercises?.[actType] && !window.isTeacherPreview) return;
+
     const block = element.closest('.student-item-block');
     if (!block) return;
 
@@ -2312,7 +2403,8 @@ function setupAutoAdvanceInputs(area, selector) {
             if (val === correctChar) {
                 this.classList.add('correct-input');
                 this.classList.remove('wrong-input');
-                if (idx < inputs.length - 1) inputs[idx + 1].focus();
+                const nextUnsolved = inputs.slice(idx + 1).find(b => !b.classList.contains('correct-input'));
+                if (nextUnsolved) nextUnsolved.focus();
             } else if (val.length > 0) {
                 this.classList.add('wrong-input');
                 this.classList.remove('correct-input');
@@ -2510,12 +2602,11 @@ function saveStudentCurrentExerciseResponses() {
         const s = sents[studentSubItemIndex];
         if (s) {
             const isTarget = (actType !== 'listen-trad');
-            const fullText = isTarget ? s.t : cleanEnglishText(s.tr);
+            const fullText = isTarget ? s.t : (typeof cleanEnglishText === 'function' ? cleanEnglishText(s.tr) : s.tr);
             const inputs = Array.from(area.querySelectorAll('.gap-inline-input'));
             const prevResp = responses[studentSubItemIndex] || {};
 
             if (inputs.length === 0) {
-                // Input boxes aren't on screen yet (audio or 3s countdown is running); keep existing saved score/answer
                 if (!prevResp.studentAnswer) {
                     responses[studentSubItemIndex] = {
                         prompt: isTarget ? s.tr : s.t,
@@ -2604,7 +2695,7 @@ function saveStudentCurrentExerciseResponses() {
             }
 
             responses[studentSubItemIndex] = {
-                prompt: (actType === 'gap-t') ? cleanEnglishText(s.tr) : s.t,
+                prompt: (actType === 'gap-t') ? (typeof cleanEnglishText === 'function' ? cleanEnglishText(s.tr) : s.tr) : s.t,
                 studentAnswer: ans || '(Empty)',
                 correctAnswer: correct || '(No gap set)',
                 isCorrect: points === 1.0,
@@ -2622,7 +2713,7 @@ function saveStudentCurrentExerciseResponses() {
             const wrongAttempts = parseInt(block.dataset.wrongAttempts || '0', 10);
             const clickedWord = block.dataset.clickedWord || '';
             const clickedIdx = parseInt(block.dataset.clickedIdx || '-1', 10);
-            const faultyShown = s.faultyTr || getOrGenerateFaultyTr(s);
+            const faultyShown = s.faultyTr || (typeof getOrGenerateFaultyTr === 'function' ? getOrGenerateFaultyTr(s) : s.tr);
             const correct = (s.tr || '').trim();
 
             let points = 0;
@@ -2702,7 +2793,7 @@ function saveStudentCurrentExerciseResponses() {
                 : 0.0;
 
             responses[studentSubItemIndex] = {
-                prompt: cleanEnglishText(s.tr || ''),
+                prompt: typeof cleanEnglishText === 'function' ? cleanEnglishText(s.tr || '') : (s.tr || ''),
                 studentAnswer: hasAnyTyped
                     ? reconstructedAns
                     : (isDone ? '(Timed out - Robot won)' : '(Empty)'),
@@ -2738,8 +2829,7 @@ function saveStudentCurrentExerciseResponses() {
         }
     }
 
-    // Save full payload immediately to localStorage and debounce Firestore sync (1.5s)
-    if (!window.isTeacherPreview) {
+    if (!window.isTeacherPreview && typeof saveDraftProgress === 'function') {
         saveDraftProgress({ immediate: false });
     }
 }
@@ -2753,7 +2843,9 @@ function nextStudentExercise() {
     }
     saveStudentCurrentExerciseResponses();
     if (!window.isTeacherPreview) {
-        saveDraftProgress();
+        if (typeof saveDraftProgress === 'function') {
+            saveDraftProgress();
+        }
         flushStudentTimeDelta();
         persistStudentTimeSnapshot(true);
     }
@@ -2766,7 +2858,7 @@ function nextStudentExercise() {
 
 function prevStudentExercise() {
     saveStudentCurrentExerciseResponses();
-    if (!window.isTeacherPreview) {
+    if (!window.isTeacherPreview && typeof saveDraftProgress === 'function') {
         saveDraftProgress();
     }
     if (studentCurrentExIndex > 0) {
@@ -2787,60 +2879,80 @@ async function submitStudentWork() {
         return;
     }
     if (!currentUser || !currentUser.email) return alert("Please sign in with your school Google account first.");
+    if (window.isSubmittingStudentWork) return;
 
-    saveStudentCurrentExerciseResponses();
-
-    const startedAtIso = window.studentTimeTracker?.startedAt || null;
-    const finalTimeSpentSeconds = stopStudentTimeTracker(false);
-    const formattedTimeSpent = formatStudentDuration(finalTimeSpentSeconds);
-
-    let earned = 0;
-    let possible = 0;
-    const detailedReport = [];
-
-    studentExerciseTypes.forEach(actType => {
-        const responses = studentAnswersState[actType] || [];
-        responses.forEach(r => {
-            earned += r.points;
-            possible += 1;
-        });
-
-        detailedReport.push({
-            activityType: actType,
-            activityTitle: getCleanActivityTitle(actType, currentStudentAssignment.lang || "French"),
-            responses: responses
-        });
-    });
-
-    const pct = possible > 0 ? Math.round((earned / possible) * 100) : 0;
-
-    const subData = {
-        assignmentId: currentStudentAssignment.id || "",
-        courseId: currentStudentAssignment.courseId || "",
-        studentName: currentUser.displayName || 'Student',
-        studentEmail: currentUser.email.toLowerCase(),
-        totalEarned: earned,
-        totalPossible: possible,
-        overallGrade: earned,
-        percentage: pct,
-        detailedReport: detailedReport,
-        timeSpentSeconds: finalTimeSpentSeconds,
-        timeSpent: formattedTimeSpent,
-        startedAt: startedAtIso,
-        isReviewed: false,
-        submittedAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
+    window.isSubmittingStudentWork = true;
+    const finalSubmitBtn = document.getElementById('student-submit-btn');
+    if (finalSubmitBtn) finalSubmitBtn.disabled = true;
 
     try {
+        saveStudentCurrentExerciseResponses();
+
+        const startedAtIso = window.studentTimeTracker?.startedAt || null;
+        const finalTimeSpentSeconds = stopStudentTimeTracker(false);
+        const formattedTimeSpent = formatStudentDuration(finalTimeSpentSeconds);
+
+        let earned = 0;
+        let possible = 0;
+        const detailedReport = [];
+
+        studentExerciseTypes.forEach(actType => {
+            const sents = currentStudentAssignment?.sentencesPerActivity?.[actType] || [];
+            const responses = studentAnswersState[actType] || [];
+            while (responses.length < sents.length) {
+                const s = sents[responses.length] || {};
+                responses.push({
+                    prompt: s.t || s.tr || '',
+                    studentAnswer: '(Empty)',
+                    correctAnswer: s.tr || s.t || '',
+                    isCorrect: false,
+                    points: 0
+                });
+            }
+
+            responses.forEach(r => {
+                earned += (Number(r.points) || 0);
+                possible += 1;
+            });
+
+            detailedReport.push({
+                activityType: actType,
+                activityTitle: getCleanActivityTitle(actType, currentStudentAssignment.lang || "French"),
+                responses: responses
+            });
+        });
+
+        const pct = possible > 0 ? Math.round((earned / possible) * 100) : 0;
+
+        const subData = {
+            assignmentId: currentStudentAssignment.id || "",
+            courseId: currentStudentAssignment.courseId || "",
+            studentName: currentUser.displayName || 'Student',
+            studentEmail: currentUser.email.toLowerCase(),
+            totalEarned: earned,
+            totalPossible: possible,
+            overallGrade: earned,
+            percentage: pct,
+            detailedReport: detailedReport,
+            timeSpentSeconds: finalTimeSpentSeconds,
+            timeSpent: formattedTimeSpent,
+            startedAt: startedAtIso,
+            isReviewed: false,
+            submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
         await db.collection("submissions").add(subData);
 
-        // Clear tracked time storage now that submission is safely written
         stopStudentTimeTracker(true);
 
-        // Cancel any queued 1.5s auto-save BEFORE deleting so it doesn't recreate the draft
-        cancelPendingDraftSave();
+        if (typeof cancelPendingDraftSave === 'function') {
+            cancelPendingDraftSave();
+        }
 
-        const draftId = getStudentDraftKey(currentStudentAssignment.id);
+        const draftId = (typeof getStudentDraftKey === 'function')
+            ? getStudentDraftKey(currentStudentAssignment.id)
+            : `${currentStudentAssignment.id}_${currentUser.email.toLowerCase()}`;
+
         if (draftId) {
             localStorage.removeItem(`student_draft_${draftId}`);
             localStorage.removeItem(`draft_${currentStudentAssignment.id}`);
@@ -2857,5 +2969,8 @@ async function submitStudentWork() {
     } catch (err) {
         console.error("Submission failed:", err);
         alert("❌ Failed to save submission to database: " + err.message + "\nPlease check your Firestore database rules.");
+    } finally {
+        window.isSubmittingStudentWork = false;
+        if (finalSubmitBtn) finalSubmitBtn.disabled = false;
     }
 }
