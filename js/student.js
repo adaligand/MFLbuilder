@@ -268,7 +268,8 @@ function getActivityInstruction(type, lang) {
         : (dcLevel === '100'
             ? `Memorise the ${lang} sentence before it disappears, then type all the missing words.`
             : `Memorise the ${lang} sentence before it disappears, then fill in the missing words.`);
-
+const brMode = getBeatRobotMode();
+const brModeLabel = brMode === 'consonants' ? 'consonants' : 'vowels';
     const map = {
         'study': 'Review the sentence patterns below before completing the exercises.',
         'match': `Click a ${lang} phrase then click its matching English translation.`,
@@ -288,7 +289,7 @@ function getActivityInstruction(type, lang) {
         'listen-missing': `Listen to the audio and click the box where a ${lang} word has been removed.`,
         'listen-faulty': 'Listen to the audio and click on the wrong word in the English translation.',
         'listen-jumbled': 'Listen to the audio and click the word chunks in order to form the sentence.',
-        'beat-robot': `Translate the English sentence into ${lang} before the robot finishes!`
+        'beat-robot': `Fill in the missing ${brModeLabel} to translate the English sentence into ${lang} before the robot finishes!`
     };
     return map[type] || 'Complete the exercise below.';
 }
@@ -325,7 +326,71 @@ function getBeatRobotSpeedConfig() {
     }
     return presets.normal;
 }
+function getBeatRobotMode() {
+    const raw = String(currentStudentAssignment?.beatRobotMode || 'vowels').trim().toLowerCase();
+    return raw === 'consonants' ? 'consonants' : 'vowels';
+}
 
+function createBeatRobotSentenceHTML(text, mode, isPlayer = true, savedLetters = [], revealAll = false) {
+    const vowels = 'aeiouAEIOUàáâäèéêëìíîïòóôöùúûüÀÁÂÄÈÉÊËÌÍÎÏÒÓÔÖÙÚÛÜ';
+    const words = (text || '').trim().split(/\s+/).filter(Boolean);
+
+    // Count how many letters match the chosen mode so sentences with 0 matching chars still remain playable
+    let matchCount = 0;
+    words.forEach(word => {
+        for (const char of word) {
+            if (/\p{L}/u.test(char)) {
+                const isVowel = vowels.includes(char);
+                if ((mode === 'vowels' && isVowel) || (mode === 'consonants' && !isVowel)) {
+                    matchCount++;
+                }
+            }
+        }
+    });
+
+    let html = '';
+    let inputIdx = 0;
+
+    words.forEach(word => {
+        html += '<div class="word-wrapper">';
+        for (const char of word) {
+            if (/\p{L}/u.test(char)) {
+                const isVowel = vowels.includes(char);
+                const shouldBeInput = matchCount > 0
+                    ? ((mode === 'vowels' && isVowel) || (mode === 'consonants' && !isVowel))
+                    : true;
+
+                if (shouldBeInput) {
+                    if (isPlayer) {
+                        const savedChar = savedLetters[inputIdx] || '';
+                        let displayVal = savedChar;
+                        let stateClass = '';
+                        if (revealAll) {
+                            displayVal = savedChar || char;
+                            stateClass = (displayVal.toLowerCase() === char.toLowerCase()) ? ' correct-answer' : ' wrong-answer';
+                        } else if (savedChar) {
+                            stateClass = (savedChar.toLowerCase() === char.toLowerCase()) ? ' correct-answer' : ' wrong-answer';
+                        }
+                        const disabledAttr = revealAll ? 'disabled' : '';
+                        html += `<input type="text" class="single-letter br-player-input${stateClass}" maxlength="1" value="${displayVal.replace(/"/g, '&quot;')}" data-original="${char.replace(/"/g, '&quot;')}" ${disabledAttr}>`;
+                    } else {
+                        const robotVal = revealAll ? char : '';
+                        const robotClass = revealAll ? ' correct-answer' : '';
+                        html += `<input type="text" class="single-letter br-robot-input${robotClass}" maxlength="1" value="${robotVal.replace(/"/g, '&quot;')}" data-original="${char.replace(/"/g, '&quot;')}" disabled>`;
+                    }
+                    inputIdx++;
+                } else {
+                    html += `<span class="static-char">${char}</span>`;
+                }
+            } else {
+                html += `<span class="punctuation">${char}</span>`;
+            }
+        }
+        html += '</div>';
+    });
+
+    return html;
+}
 async function loadStudentTask(assignmentId) {
     window.isTeacherPreview = false;
     stopStudentTimeTracker(false);
@@ -1460,14 +1525,15 @@ function renderCurrentStudentExercise() {
                 setTimeout(() => speakTL(targetText), 200);
             }
         }
-        else if (actType === 'beat-robot') {
+  else if (actType === 'beat-robot') {
             const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
             const isAlreadyDone = !!(savedResp && savedResp.isDone);
             const didWin = !!(savedResp && savedResp.beatRobotWon);
-            const speedCfg = getBeatRobotSpeedConfig();
-            const restoredText = (savedResp && savedResp.studentAnswer && !savedResp.studentAnswer.startsWith('('))
-                ? savedResp.studentAnswer
-                : '';
+            const mode = getBeatRobotMode();
+            const savedLetters = Array.isArray(savedResp?.letterValues) ? savedResp.letterValues : [];
+
+            const playerBoardHTML = createBeatRobotSentenceHTML(targetText, mode, true, savedLetters, isAlreadyDone);
+            const robotBoardHTML = createBeatRobotSentenceHTML(targetText, mode, false, [], isAlreadyDone && !didWin);
 
             cardContentHTML = `
                 <div class="student-item-block beat-robot-block"
@@ -1475,49 +1541,27 @@ function renderCurrentStudentExercise() {
                     data-correct="${targetText.replace(/"/g, '&quot;')}"
                     data-robot-done="${isAlreadyDone ? 'true' : 'false'}"
                     data-robot-won="${didWin ? 'true' : 'false'}"
-                    style="text-align:center; padding:10px 0;">
-                    <div style="display:flex; justify-content:center; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
-                        <span style="font-size:24px; font-weight:bold; color:#0f172a;">${englishText}</span>
-                        <span style="background:#ede9fe; color:#5b21b6; border:1px solid #c4b5fd; font-size:12px; font-weight:700; padding:3px 10px; border-radius:999px;">
-                            🤖 Speed: ${speedCfg.label}
-                        </span>
-                    </div>
-
-                    <div id="beat-robot-track-wrap" style="max-width:540px; margin:0 auto 18px auto; background:#f8fafc; border:1px solid #cbd5e1; border-radius:10px; padding:10px 14px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:700; color:#475569; margin-bottom:6px;">
-                            <span id="beat-robot-status-label">
-                                ${isAlreadyDone
-                                    ? (didWin ? '🏆 You finished before the robot!' : '🤖 Robot reached the finish line!')
-                                    : '🤖 Robot is racing...'}
-                            </span>
-                            <span id="beat-robot-pct-label">${isAlreadyDone ? (didWin ? 'Stopped' : '100%') : '0%'}</span>
+                    data-wrong-attempts="${savedResp?.mistakes || 0}"
+                    style="padding:14px;">
+                    <div class="br-board-grid">
+                        <div class="br-panel br-player">
+                            <h2 class="br-panel-title">You</h2>
+                            <div class="br-source-container">
+                                <div class="br-source-label">Translate this:</div>
+                                <div class="br-source-sentence">${englishText}</div>
+                            </div>
+                            <div class="br-question-container">${playerBoardHTML}</div>
+                            <div class="br-status-overlay${isAlreadyDone && didWin ? ' visible' : ''}">You Win!</div>
                         </div>
-                        <div style="position:relative; height:14px; background:#e2e8f0; border-radius:999px; overflow:hidden;">
-                            <div id="beat-robot-progress-fill" style="height:100%; width:${isAlreadyDone && !didWin ? '100%' : '0%'}; background:${isAlreadyDone ? (didWin ? '#10b981' : '#ef4444') : 'linear-gradient(90deg, #8b5cf6, #ec4899)'}; border-radius:999px; transition:width 0.08s linear;"></div>
+                        <div class="br-panel br-computer">
+                            <h2 class="br-panel-title">Robot</h2>
+                            <div class="br-source-container">
+                                <div class="br-source-label">Translate this:</div>
+                                <div class="br-source-sentence">${englishText}</div>
+                            </div>
+                            <div class="br-question-container">${robotBoardHTML}</div>
+                            <div class="br-status-overlay${isAlreadyDone && !didWin ? ' visible' : ''}">Robot Wins!</div>
                         </div>
-                    </div>
-
-                    <div style="display:flex; justify-content:center; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
-                        <input type="text"
-                            id="beat-robot-input"
-                            class="full-typing-input"
-                            value="${restoredText.replace(/"/g, '&quot;')}"
-                            ${isAlreadyDone ? 'disabled' : ''}
-                            placeholder="Type ${docLang} translation before the robot finishes..."
-                            style="width:76%; max-width:460px; padding:10px 14px; border:2px solid ${isAlreadyDone ? (didWin ? '#10b981' : '#ef4444') : '#8b5cf6'}; border-radius:8px; font-size:20px; text-align:center; box-sizing:border-box;">
-                        ${!isAlreadyDone ? `
-                            <button type="button" id="beat-robot-check-btn" class="btn-purple" style="padding:10px 18px; font-size:15px; margin:0;">
-                                ⚡ Submit
-                            </button>
-                        ` : ''}
-                    </div>
-
-                    <div id="beat-robot-feedback" style="min-height:24px; font-weight:bold; font-size:15px; color:${isAlreadyDone ? (didWin ? '#10b981' : '#ef4444') : '#64748b'};">
-                        ${isAlreadyDone
-                            ? (didWin
-                                ? `✅ You beat the robot! (+1 pt)`
-                                : `Correct ${docLang}: <span style="color:#2563eb;">${targetText}</span>`)
-                            : ''}
                     </div>
                 </div>
             `;
@@ -1989,70 +2033,50 @@ function runStudentBeatTheRobot(targetText, itemIdx) {
 
     const area = document.getElementById('exercise-interactive-area');
     const block = area ? area.querySelector('.beat-robot-block') : null;
-    const input = document.getElementById('beat-robot-input');
-    const checkBtn = document.getElementById('beat-robot-check-btn');
-    const fillEl = document.getElementById('beat-robot-progress-fill');
-    const statusEl = document.getElementById('beat-robot-status-label');
-    const pctEl = document.getElementById('beat-robot-pct-label');
-    const feedbackEl = document.getElementById('beat-robot-feedback');
+    if (!block) return;
 
-    if (!block || !input) return;
+    const playerInputs = Array.from(block.querySelectorAll('.br-player .br-player-input'));
+    const robotInputs = Array.from(block.querySelectorAll('.br-computer .br-robot-input'));
+    const playerOverlay = block.querySelector('.br-player .br-status-overlay');
+    const robotOverlay = block.querySelector('.br-computer .br-status-overlay');
 
     const speedCfg = getBeatRobotSpeedConfig();
-    const charCount = Math.max(4, (targetText || '').trim().length);
-    const totalDurationMs = speedCfg.fixedDurationMs
-        || (speedCfg.headStartMs + charCount * speedCfg.msPerChar);
-
+    const stepMs = speedCfg.msPerChar ? Math.max(600, Math.round(speedCfg.msPerChar * 8.1)) : 1500;
     const startTime = performance.now();
-    let settled = false;
+    let gameInProgress = true;
+    let robotInterval = null;
 
-    const finishRound = (reason) => {
-        if (settled) return;
-        settled = true;
+    const settleRound = (playerWon) => {
+        if (!gameInProgress) return;
+        gameInProgress = false;
+        if (robotInterval) {
+            clearInterval(robotInterval);
+            robotInterval = null;
+        }
         clearStudentOneByOneTimers();
 
         const elapsedMs = Math.round(performance.now() - startTime);
-        const typedVal = input.value.trim();
-        const evalRes = evaluateTextSimilarity(typedVal, targetText);
-        const isExact = (evalRes.points === 1);
-        const studentWon = (reason !== 'timeout') && isExact;
-
         block.dataset.robotDone = 'true';
-        block.dataset.robotWon = studentWon ? 'true' : 'false';
+        block.dataset.robotWon = playerWon ? 'true' : 'false';
         block.dataset.elapsedMs = String(elapsedMs);
 
-        input.disabled = true;
-        if (checkBtn) checkBtn.style.display = 'none';
-
-        if (studentWon) {
-            input.style.borderColor = '#10b981';
-            input.style.background = '#ecfdf5';
-            if (fillEl) fillEl.style.background = '#10b981';
-            if (statusEl) statusEl.innerText = '🏆 You finished before the robot!';
-            if (pctEl) pctEl.innerText = 'Stopped';
-            if (feedbackEl) {
-                feedbackEl.style.color = '#10b981';
-                feedbackEl.innerHTML = `✅ You beat the robot in ${(elapsedMs / 1000).toFixed(1)}s! (+1 pt)`;
-            }
+        if (playerWon) {
+            playerInputs.forEach(inp => { inp.disabled = true; });
+            if (playerOverlay) playerOverlay.classList.add('visible');
             if (typeof speakTL === 'function') speakTL(targetText);
         } else {
-            input.style.borderColor = evalRes.points > 0 ? '#f59e0b' : '#ef4444';
-            input.style.background = evalRes.points > 0 ? '#fffbeb' : '#fef2f2';
-            if (fillEl) {
-                fillEl.style.width = '100%';
-                fillEl.style.background = '#ef4444';
-            }
-            if (pctEl) pctEl.innerText = '100%';
-            if (statusEl) {
-                statusEl.innerText = (reason === 'timeout')
-                    ? '🤖 The robot finished first!'
-                    : '🤖 Not quite — robot wins this round!';
-            }
-            if (feedbackEl) {
-                feedbackEl.style.color = evalRes.points > 0 ? '#d97706' : '#ef4444';
-                const partialNote = evalRes.points > 0 ? ' (Partial credit: +0.5 pt)' : '';
-                feedbackEl.innerHTML = `${reason === 'timeout' ? '⏱️ Time up!' : '❌ Incorrect.'}${partialNote} Correct answer: <span style="color:#2563eb;">${targetText}</span>`;
-            }
+            if (robotOverlay) robotOverlay.classList.add('visible');
+            playerInputs.forEach(inp => {
+                if (!inp.value) inp.value = inp.dataset.original;
+                if (inp.value.toLowerCase() !== inp.dataset.original.toLowerCase()) {
+                    inp.classList.add('wrong-answer');
+                    inp.classList.remove('correct-answer');
+                } else {
+                    inp.classList.add('correct-answer');
+                    inp.classList.remove('wrong-answer');
+                }
+                inp.disabled = true;
+            });
         }
 
         saveStudentCurrentExerciseResponses();
@@ -2060,51 +2084,80 @@ function runStudentBeatTheRobot(targetText, itemIdx) {
         checkExerciseCompletion();
     };
 
-    input.onfocus = function() {
-        activeInputForVK = this;
-    };
-    input.oninput = function() {
-        if (settled) return;
-        if (normalizeString(this.value) === normalizeString(targetText)) {
-            finishRound('exact');
-            return;
-        }
-        saveStudentCurrentExerciseResponses();
-    };
-    input.onkeydown = function(e) {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            if (!settled) {
-                finishRound('submit');
+    playerInputs.forEach((input, index) => {
+        input.addEventListener('focus', () => {
+            activeInputForVK = input;
+        });
+
+        input.addEventListener('input', () => {
+            if (!gameInProgress) return;
+            const originalChar = input.dataset.original.toLowerCase();
+            const enteredChar = input.value.toLowerCase();
+
+            if (enteredChar === originalChar) {
+                input.classList.remove('wrong-answer');
+                input.classList.add('correct-answer');
+
+                // Advance to the next incomplete letter box
+                let nextIdx = index + 1;
+                while (nextIdx < playerInputs.length && playerInputs[nextIdx].classList.contains('correct-answer')) {
+                    nextIdx++;
+                }
+                if (nextIdx < playerInputs.length) {
+                    playerInputs[nextIdx].focus();
+                }
+
+                const allCorrect = playerInputs.every(
+                    inp => inp.value.toLowerCase() === inp.dataset.original.toLowerCase()
+                );
+                if (allCorrect) {
+                    settleRound(true);
+                    return;
+                }
+            } else if (enteredChar.length > 0) {
+                input.classList.remove('correct-answer');
+                input.classList.add('wrong-answer');
+                block.dataset.wrongAttempts = String(parseInt(block.dataset.wrongAttempts || '0', 10) + 1);
             } else {
-                const submitBtn = document.getElementById('one-by-one-submit-btn');
-                if (submitBtn && submitBtn.style.display !== 'none') submitBtn.click();
+                input.classList.remove('correct-answer', 'wrong-answer');
             }
-        }
-    };
-    if (checkBtn) {
-        checkBtn.onclick = () => finishRound('submit');
+
+            saveStudentCurrentExerciseResponses();
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Backspace' && input.value === '' && index > 0) {
+                playerInputs[index - 1].focus();
+            }
+        });
+    });
+
+    if (playerInputs.length > 0) {
+        setTimeout(() => {
+            playerInputs[0].focus();
+            activeInputForVK = playerInputs[0];
+        }, 20);
     }
 
-    const tick = (now) => {
-        if (settled || !document.body.contains(block)) return;
-        const elapsed = now - startTime;
-        const progress = Math.min(1, elapsed / totalDurationMs);
-        const pct = Math.round(progress * 100);
-
-        if (fillEl) fillEl.style.width = `${pct}%`;
-        if (pctEl) pctEl.innerText = `${pct}%`;
-
-        if (progress >= 1) {
-            finishRound('timeout');
-        } else {
-            beatRobotRafId = requestAnimationFrame(tick);
+    // Robot types one missing vowel/consonant per interval tick so the student sees it live
+    let robotIdx = 0;
+    robotInterval = setInterval(() => {
+        if (!gameInProgress || !document.body.contains(block)) {
+            clearInterval(robotInterval);
+            return;
         }
-    };
+        if (robotIdx < robotInputs.length) {
+            const rInput = robotInputs[robotIdx];
+            rInput.value = rInput.dataset.original;
+            rInput.classList.add('correct-answer');
+            robotIdx++;
+        } else {
+            settleRound(false);
+        }
+    }, stepMs);
 
-    beatRobotRafId = requestAnimationFrame(tick);
+    studentOneByOneTimers.push(robotInterval);
 }
-
 /* =========================
    UPDATED EVENT HELPERS
 ========================= */
@@ -2589,7 +2642,7 @@ function saveStudentCurrentExerciseResponses() {
             };
         }
     }
-    // --- BEAT THE ROBOT ---
+  // --- BEAT THE ROBOT ---
     else if (actType === 'beat-robot') {
         const block = area.querySelector('.beat-robot-block');
         const s = sents[studentSubItemIndex];
