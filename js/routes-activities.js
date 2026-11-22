@@ -1863,7 +1863,7 @@ function refreshActivitySentences(actId, e) {
     };
 
     window.editingSavedSentencesMap = updatedMap;
-    renderPerActivitySentenceBoxes(updatedMap);
+    renderPerActivitySentenceBoxes(updatedMap, true);
 
     const body = document.getElementById(`act-body-${actId}`);
     const arrow = document.getElementById(`arrow-${actId}`);
@@ -1873,15 +1873,9 @@ function refreshActivitySentences(actId, e) {
     }
 }
 
-function renderPerActivitySentenceBoxes(overrideSentencesMap = null) {
+function renderPerActivitySentenceBoxes(overrideSentencesMap = null, preserveCategoryState = false) {
     ensureGroupedActivityList();
-    updateActivityCategoryCounts(Boolean(overrideSentencesMap));
-
-    const container = document.getElementById('per-activity-sentences-container');
-    if (container && !container.dataset.timeEstimateBound) {
-        container.addEventListener('input', () => updateAssignmentTimeEstimate());
-        container.dataset.timeEstimateBound = 'true';
-    }
+    updateActivityCategoryCounts(Boolean(overrideSentencesMap) && !preserveCategoryState);
 
     // Preserve currently expanded exercise cards across re-renders
     const expandedActivityIds = new Set();
