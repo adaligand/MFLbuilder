@@ -84,6 +84,7 @@ let currentFsFontSize = 28;
 let currentFsWidthPercent = 100;
 let studentSubItemIndex = 0;
 let studentOneByOneTimers = [];
+let beatRobotRafId = null;
 let firestoreDraftTimer = null;
 let firestoreAutoSaveTimer = null;
 let hasPendingCloudSave = false;
@@ -172,6 +173,11 @@ function clearStudentOneByOneTimers() {
         clearTimeout(t);
     });
     studentOneByOneTimers = [];
+
+    if (beatRobotRafId !== null) {
+        cancelAnimationFrame(beatRobotRafId);
+        beatRobotRafId = null;
+    }
 }
 
 function initFullscreenToolbar() {
@@ -656,6 +662,12 @@ function showPage(pageId) {
 
     if (pageId === 'library-page' && currentUser) {
         renderLibrary();
+    }
+
+    // --- ADD THESE 4 LINES HERE ---
+    if (pageId !== 'student-portal-page') {
+        clearStudentOneByOneTimers();
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     }
 
     if (pageId !== 'editor-page' && pageId !== 'student-portal-page') {
