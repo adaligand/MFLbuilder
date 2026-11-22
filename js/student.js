@@ -2,6 +2,8 @@
    STUDENT PORTAL & MARKSHEET REVIEW
 ========================= */
 const STUDENT_MULTI_GAP_ACTIVITIES = ['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'];
+const STUDENT_VOWELS_REGEX = /[aeiouáéíóúàèìòùâêîôûäëïöüÿ]/i;
+const STUDENT_CONSONANTS_REGEX = /[bcdfghjklmnpqrstvwxyzßçñ]/i;
 
 /* =========================
    STUDENT ACTIVE TIME TRACKER
@@ -236,6 +238,7 @@ function getActivityGapLevel(actType) {
     const cleaned = String(raw).replace('%', '').trim();
     return ['1', '25', '50', '75', '100'].includes(cleaned) ? cleaned : '1';
 }
+
 function getDelayedCopyingGapLevel() {
     return getActivityGapLevel('delayed-copying');
 }
@@ -268,8 +271,9 @@ function getActivityInstruction(type, lang) {
         : (dcLevel === '100'
             ? `Memorise the ${lang} sentence before it disappears, then type all the missing words.`
             : `Memorise the ${lang} sentence before it disappears, then fill in the missing words.`);
-const brMode = getBeatRobotMode();
-const brModeLabel = brMode === 'consonants' ? 'consonants' : 'vowels';
+
+    const brMode = getBeatRobotMode();
+    const brModeLabel = brMode === 'consonants' ? 'consonants' : 'vowels';
     const map = {
         'study': 'Review the sentence patterns below before completing the exercises.',
         'match': `Click a ${lang} phrase then click its matching English translation.`,
@@ -326,13 +330,14 @@ function getBeatRobotSpeedConfig() {
     }
     return presets.normal;
 }
+
 function getBeatRobotMode() {
     const raw = String(currentStudentAssignment?.beatRobotMode || 'vowels').trim().toLowerCase();
     return raw === 'consonants' ? 'consonants' : 'vowels';
 }
 
 function createBeatRobotSentenceHTML(text, mode, isPlayer = true, savedLetters = [], revealAll = false) {
-    const vowels = 'aeiouAEIOUàáâäèéêëìíîïòóôöùúûüÀÁÂÄÈÉÊËÌÍÎÏÒÓÔÖÙÚÛÜ';
+    const vowels = 'aeiouAEIOUáéíóúàèìòùâêîôûäëïöüÿÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÄËÏÖÜŸ';
     const words = (text || '').trim().split(/\s+/).filter(Boolean);
 
     // Count how many letters match the chosen mode so sentences with 0 matching chars still remain playable
@@ -391,6 +396,7 @@ function createBeatRobotSentenceHTML(text, mode, isPlayer = true, savedLetters =
 
     return html;
 }
+
 async function loadStudentTask(assignmentId) {
     window.isTeacherPreview = false;
     stopStudentTimeTracker(false);
@@ -1220,7 +1226,13 @@ function renderCurrentStudentExercise() {
 
     // --- MATCH UP ACTIVITY (FULL TABLE MODE) ---
     if (actType === 'match') {
-        let matchState = { selectedTarget: null, selectedEng: null, matchedCount: 0 };
+        const savedMatchResps = studentAnswersState['match'] || [];
+        const preMatchedIds = new Set(
+            savedMatchResps
+                .map((r, idx) => (r && r.isDone ? String(idx) : null))
+                .filter(Boolean)
+        );
+        let matchState = { selectedTarget: null, selectedEng: null, matchedCount: preMatchedIds.size };
 
         let shuffledEng = shuffleArray(sents.map((s, idx) => ({ tr: s.tr, id: idx })));
         let shuffledTarget = shuffleArray(sents.map((s, idx) => ({ t: s.t, id: idx })));
@@ -1230,13 +1242,20 @@ function renderCurrentStudentExercise() {
                 <div style="background:#f8fafc; padding:12px; border-radius:8px; border:1px solid #e2e8f0;">
                     <h4 style="margin-top:0; margin-bottom:12px; font-size:15px; color:#1e293b; text-align:center; border-bottom:2px solid #3b82f6; padding-bottom:6px;">Column 1: ${docLang}</h4>
                     <div id="match-target-col" style="display:flex; flex-direction:column; gap:8px;">
-                        ${shuffledTarget.map(item => `<div class="interactive-tile match-t-tile" data-id="${item.id}" style="display:block; width:100%; text-align:left; padding:8px 12px; box-sizing:border-box;">${item.t}</div>`).join('')}
+                        ${shuffledTarget.map(item => {
+                            const isMatched = preMatchedIds.has(String(item.id));
+                            const mistakes = savedMatchResps[item.id]?.mistakes || 0;
+                            return `<div class="interactive-tile match-t-tile${isMatched ? ' correct-match' : ''}" data-id="${item.id}" data-wrong-attempts="${mistakes}" style="display:block; width:100%; text-align:left; padding:8px 12px; box-sizing:border-box;${isMatched ? ' opacity:0.3;' : ''}">${item.t}</div>`;
+                        }).join('')}
                     </div>
                 </div>
                 <div style="background:#f8fafc; padding:12px; border-radius:8px; border:1px solid #e2e8f0;">
                     <h4 style="margin-top:0; margin-bottom:12px; font-size:15px; color:#1e293b; text-align:center; border-bottom:2px solid #10b981; padding-bottom:6px;">Column 2: English</h4>
                     <div id="match-eng-col" style="display:flex; flex-direction:column; gap:8px;">
-                        ${shuffledEng.map(item => `<div class="interactive-tile match-tr-tile" data-id="${item.id}" style="display:block; width:100%; text-align:left; padding:8px 12px; box-sizing:border-box;">${item.tr}</div>`).join('')}
+                        ${shuffledEng.map(item => {
+                            const isMatched = preMatchedIds.has(String(item.id));
+                            return `<div class="interactive-tile match-tr-tile${isMatched ? ' correct-match' : ''}" data-id="${item.id}" style="display:block; width:100%; text-align:left; padding:8px 12px; box-sizing:border-box;${isMatched ? ' opacity:0.3;' : ''}">${item.tr}</div>`;
+                        }).join('')}
                     </div>
                 </div>
             </div>
@@ -1418,7 +1437,7 @@ function renderCurrentStudentExercise() {
         }
         else if (actType === 'vowels' || actType === 'cons') {
             const isVowels = (actType === 'vowels');
-            const regex = isVowels ? VOWELS_REGEX : CONSONANTS_REGEX;
+            const regex = isVowels ? STUDENT_VOWELS_REGEX : STUDENT_CONSONANTS_REGEX;
             const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
             const savedLetters = savedResp?.letterValues || [];
             let boxIdx = 0;
@@ -1460,9 +1479,13 @@ function renderCurrentStudentExercise() {
             let { fullMatch, cleanGap } = extractGapWord(fullSentence);
 
             let displaySentence = fullSentence;
+            const safeSaved = (savedVal && savedVal !== '(Empty)') ? savedVal : '';
             if (fullMatch && cleanGap) {
-                const inputHtml = `<input type="text" class="gap-inline-input" data-correct="${cleanGap.replace(/"/g, '&quot;')}" value="${savedVal !== '(Empty)' ? savedVal : ''}" style="padding:4px 8px; border:2px solid #cbd5e1; border-radius:6px; font-weight:bold; font-size:22px; width:160px; margin:0 4px; text-align:center;">`;
+                const inputHtml = `<input type="text" class="gap-inline-input" data-correct="${cleanGap.replace(/"/g, '&quot;')}" value="${safeSaved.replace(/"/g, '&quot;')}" style="padding:4px 8px; border:2px solid #cbd5e1; border-radius:6px; font-weight:bold; font-size:22px; width:160px; margin:0 4px; text-align:center;">`;
                 displaySentence = displaySentence.replace(fullMatch, inputHtml);
+            } else {
+                const fallbackGap = makeStudentGapHTML(fullSentence, studentSubItemIndex, actType, safeSaved);
+                displaySentence = fallbackGap.html;
             }
 
             cardContentHTML = `
@@ -1525,7 +1548,7 @@ function renderCurrentStudentExercise() {
                 setTimeout(() => speakTL(targetText), 200);
             }
         }
-  else if (actType === 'beat-robot') {
+        else if (actType === 'beat-robot') {
             const savedResp = studentAnswersState[actType]?.[studentSubItemIndex];
             const isAlreadyDone = !!(savedResp && savedResp.isDone);
             const didWin = !!(savedResp && savedResp.beatRobotWon);
@@ -1578,10 +1601,12 @@ function renderCurrentStudentExercise() {
                 answerRef = targetText;
             }
 
+            const safeSaved = (savedVal && savedVal !== '(Empty)') ? savedVal : '';
+
             cardContentHTML = `
                 <div class="student-item-block" data-idx="${studentSubItemIndex}" data-correct="${answerRef.replace(/"/g, '&quot;')}" style="text-align:center; padding:10px 0;">
                     <div style="margin-bottom:20px;">${promptText}</div>
-                    <input type="text" class="full-typing-input" value="${savedVal !== '(Empty)' ? savedVal : ''}" placeholder="Type answer here..." style="width:80%; max-width:500px; padding:10px 14px; border:2px solid #cbd5e1; border-radius:8px; font-size:20px; text-align:center; box-sizing:border-box;">
+                    <input type="text" class="full-typing-input" value="${safeSaved.replace(/"/g, '&quot;')}" placeholder="Type answer here..." style="width:80%; max-width:500px; padding:10px 14px; border:2px solid #cbd5e1; border-radius:8px; font-size:20px; text-align:center; box-sizing:border-box;">
                 </div>
             `;
         }
@@ -2134,8 +2159,9 @@ function runStudentBeatTheRobot(targetText, itemIdx) {
 
     if (playerInputs.length > 0) {
         setTimeout(() => {
-            playerInputs[0].focus();
-            activeInputForVK = playerInputs[0];
+            const firstIncomplete = playerInputs.find(inp => !inp.classList.contains('correct-answer')) || playerInputs[0];
+            firstIncomplete.focus();
+            activeInputForVK = firstIncomplete;
         }, 20);
     }
 
@@ -2158,6 +2184,7 @@ function runStudentBeatTheRobot(targetText, itemIdx) {
 
     studentOneByOneTimers.push(robotInterval);
 }
+
 /* =========================
    UPDATED EVENT HELPERS
 ========================= */
@@ -2183,8 +2210,10 @@ function check_nospace_click(e, element, itemIdx) {
     if (element.classList.contains('space-span')) {
         checkAdjacent(element);
     } else {
-        checkAdjacent(element.previousElementSibling);
         checkAdjacent(element.nextElementSibling);
+        if (!isCorrectClick) {
+            checkAdjacent(element.previousElementSibling);
+        }
     }
 
     if (!isCorrectClick) {
@@ -2575,7 +2604,7 @@ function saveStudentCurrentExerciseResponses() {
             }
 
             responses[studentSubItemIndex] = {
-                prompt: s.t,
+                prompt: (actType === 'gap-t') ? cleanEnglishText(s.tr) : s.t,
                 studentAnswer: ans || '(Empty)',
                 correctAnswer: correct || '(No gap set)',
                 isCorrect: points === 1.0,
@@ -2642,29 +2671,46 @@ function saveStudentCurrentExerciseResponses() {
             };
         }
     }
-  // --- BEAT THE ROBOT ---
+    // --- BEAT THE ROBOT ---
     else if (actType === 'beat-robot') {
         const block = area.querySelector('.beat-robot-block');
         const s = sents[studentSubItemIndex];
         if (block && s) {
-            const input = document.getElementById('beat-robot-input');
-            const ans = input ? input.value.trim() : '';
+            const playerInputs = Array.from(block.querySelectorAll('.br-player .br-player-input'));
+            const letterValues = playerInputs.map(inp => inp.value || '');
+            const wrongAttempts = parseInt(block.dataset.wrongAttempts || '0', 10);
+
+            const wordWrappers = Array.from(block.querySelectorAll('.br-player .word-wrapper'));
+            const reconstructedAns = wordWrappers.map(wrapper => {
+                return Array.from(wrapper.childNodes).map(node => {
+                    if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'INPUT') {
+                        return node.value || '_';
+                    }
+                    return node.textContent || '';
+                }).join('');
+            }).join(' ').trim();
+
+            const hasAnyTyped = letterValues.some(v => v.trim() !== '');
             const correct = (s.t || '').trim();
             const isDone = (block.dataset.robotDone === 'true');
             const beatRobotWon = (block.dataset.robotWon === 'true');
             const elapsedMs = parseInt(block.dataset.elapsedMs || '0', 10);
 
-            const evalResult = evaluateTextSimilarity(ans, correct);
+            const evalResult = evaluateTextSimilarity(reconstructedAns.replace(/_/g, ''), correct);
             const points = isDone
                 ? (beatRobotWon ? 1.0 : (evalResult.points === 0.5 ? 0.5 : 0.0))
                 : 0.0;
 
             responses[studentSubItemIndex] = {
                 prompt: cleanEnglishText(s.tr || ''),
-                studentAnswer: ans || (isDone ? '(Timed out - Robot won)' : '(Empty)'),
+                studentAnswer: hasAnyTyped
+                    ? reconstructedAns
+                    : (isDone ? '(Timed out - Robot won)' : '(Empty)'),
                 correctAnswer: correct || '(No markscheme translation set)',
                 isCorrect: points === 1.0,
                 points: points,
+                mistakes: wrongAttempts,
+                letterValues: letterValues,
                 isDone: isDone,
                 beatRobotWon: beatRobotWon,
                 elapsedMs: elapsedMs
