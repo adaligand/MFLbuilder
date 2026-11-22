@@ -423,6 +423,7 @@ function arrangeActivityMenuLayout() {
             });
 
             col3.querySelectorAll('button').forEach(btn => {
+                if (btn.closest('#gc-student-selector-wrapper')) return;
                 btn.style.setProperty('width', '100%', 'important');
                 btn.style.setProperty('max-width', '100%', 'important');
                 btn.style.setProperty('box-sizing', 'border-box', 'important');
@@ -1003,6 +1004,10 @@ function openActivityMenu() {
     editingAssignmentId = null;
     window.editingSavedSentencesMap = {};
     window.duplicatingAssignmentLang = null;
+
+    if (typeof resetCourseStudentSelector === 'function') {
+        resetCourseStudentSelector();
+    }
 
     hideSentenceTableCountControl();
     arrangeActivityMenuLayout();
@@ -2459,12 +2464,320 @@ function generateWorksheet() {
 }
 
 /* =========================
-   GOOGLE CLASSROOM ASSIGNMENT PUBLISHING & EDITING
+   GOOGLE CLASSROOM STUDENT SELECTOR, ASSIGNMENT PUBLISHING & EDITING
 ========================= */
+window.gcCourseStudentsState = {
+    courseId: null,
+    students: [],
+    selectedIds: new Set(),
+    isLoading: false,
+    isOpen: false,
+    loadToken: 0
+};
+
+function escapeStudentAttr(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function ensureCourseStudentSelectorUI() {
+    const assignFields = document.getElementById('classroom-assign-fields');
+    const courseSelect = document.getElementById('gc-course-select');
+    if (!assignFields || !courseSelect) return null;
+
+    if (!courseSelect.dataset.studentSelectorBound) {
+        courseSelect.addEventListener('change', (e) => {
+            loadCourseStudents(e.target.value);
+        });
+        courseSelect.dataset.studentSelectorBound = 'true';
+    }
+
+    let wrapper = document.getElementById('gc-student-selector-wrapper');
+    if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.id = 'gc-student-selector-wrapper';
+        wrapper.style.cssText = 'display:none; margin:8px 0; width:100%; box-sizing:border-box;';
+        wrapper.innerHTML = `
+            <label style="display:block; font-size:12px; font-weight:700; color:#334155; margin-bottom:4px;">Assign to:</label>
+            <button type="button" id="gc-student-toggle-btn" onclick="toggleGcStudentDropdown()"
+                style="width:100%; box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:6px; padding:7px 10px; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; font-size:12px; font-weight:600; color:#1e293b; cursor:pointer; text-align:left;">
+                <span id="gc-student-toggle-label" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">👥 All students</span>
+                <span id="gc-student-toggle-chevron" style="font-size:10px; color:#64748b; flex-shrink:0;">▼</span>
+            </button>
+            <div id="gc-student-dropdown-panel" style="display:none; margin-top:4px; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; box-shadow:0 4px 12px rgba(15,23,42,0.08); overflow:hidden;">
+                <div style="padding:6px; border-bottom:1px solid #e2e8f0; background:#f8fafc;">
+                    <input type="text" id="gc-student-search-input" placeholder="Search student..."
+                        oninput="renderGcStudentChecklist()"
+                        style="width:100%; box-sizing:border-box; padding:4px 7px; font-size:11px; border:1px solid #cbd5e1; border-radius:4px; outline:none;">
+                </div>
+                <label style="display:flex; align-items:center; gap:7px; padding:7px 8px; border-bottom:1px solid #e2e8f0; background:#f1f5f9; font-size:12px; font-weight:700; color:#0f172a; cursor:pointer; margin:0;">
+                    <input type="checkbox" id="gc-student-select-all" onchange="toggleAllGcStudents(this.checked)"
+                        style="width:14px; height:14px; margin:0; accent-color:#2563eb; cursor:pointer; flex-shrink:0;">
+                    <span>All students</span>
+                </label>
+                <div id="gc-student-checklist" style="max-height:175px; overflow-y:auto; padding:2px 0;"></div>
+            </div>
+        `;
+
+        let anchorEl = courseSelect;
+        while (anchorEl && anchorEl.parentElement && anchorEl.parentElement !== assignFields) {
+            anchorEl = anchorEl.parentElement;
+        }
+        if (anchorEl && anchorEl.parentElement === assignFields) {
+            anchorEl.insertAdjacentElement('afterend', wrapper);
+        } else {
+            courseSelect.insertAdjacentElement('afterend', wrapper);
+        }
+    }
+
+    return wrapper;
+}
+
+function resetCourseStudentSelector() {
+    const prevToken = (window.gcCourseStudentsState && window.gcCourseStudentsState.loadToken) || 0;
+    window.gcCourseStudentsState = {
+        courseId: null,
+        students: [],
+        selectedIds: new Set(),
+        isLoading: false,
+        isOpen: false,
+        loadToken: prevToken + 1
+    };
+    const wrapper = document.getElementById('gc-student-selector-wrapper');
+    const panel = document.getElementById('gc-student-dropdown-panel');
+    const searchInput = document.getElementById('gc-student-search-input');
+    if (searchInput) searchInput.value = '';
+    if (panel) panel.style.display = 'none';
+    if (wrapper) wrapper.style.display = 'none';
+}
+
+function toggleGcStudentDropdown(forceOpen = null) {
+    const panel = document.getElementById('gc-student-dropdown-panel');
+    const chevron = document.getElementById('gc-student-toggle-chevron');
+    if (!panel) return;
+
+    const shouldOpen = forceOpen !== null ? forceOpen : (panel.style.display === 'none');
+    window.gcCourseStudentsState.isOpen = shouldOpen;
+    panel.style.display = shouldOpen ? 'block' : 'none';
+    if (chevron) chevron.textContent = shouldOpen ? '▲' : '▼';
+
+    if (shouldOpen) {
+        const searchInput = document.getElementById('gc-student-search-input');
+        if (searchInput) setTimeout(() => searchInput.focus(), 20);
+    }
+}
+
+function updateGcStudentToggleSummary() {
+    const state = window.gcCourseStudentsState;
+    const labelEl = document.getElementById('gc-student-toggle-label');
+    const toggleBtn = document.getElementById('gc-student-toggle-btn');
+    const selectAllCb = document.getElementById('gc-student-select-all');
+    if (!labelEl) return;
+
+    const total = state.students.length;
+    const selectedCount = state.selectedIds.size;
+
+    if (state.isLoading) {
+        labelEl.textContent = '⏳ Loading students...';
+        if (toggleBtn) toggleBtn.style.borderColor = '#cbd5e1';
+        return;
+    }
+
+    if (total === 0) {
+        labelEl.textContent = 'No students in course';
+        if (toggleBtn) toggleBtn.style.borderColor = '#cbd5e1';
+        if (selectAllCb) {
+            selectAllCb.checked = false;
+            selectAllCb.indeterminate = false;
+        }
+        return;
+    }
+
+    if (selectedCount === 0) {
+        labelEl.textContent = '⚠️ 0 students selected';
+        if (toggleBtn) toggleBtn.style.borderColor = '#ef4444';
+    } else if (selectedCount === total) {
+        labelEl.textContent = `👥 All students (${total})`;
+        if (toggleBtn) toggleBtn.style.borderColor = '#cbd5e1';
+    } else {
+        labelEl.textContent = `👤 ${selectedCount} of ${total} student${selectedCount === 1 ? '' : 's'}`;
+        if (toggleBtn) toggleBtn.style.borderColor = '#2563eb';
+    }
+
+    if (selectAllCb) {
+        selectAllCb.checked = (selectedCount === total);
+        selectAllCb.indeterminate = (selectedCount > 0 && selectedCount < total);
+    }
+}
+
+function renderGcStudentChecklist() {
+    const state = window.gcCourseStudentsState;
+    const listEl = document.getElementById('gc-student-checklist');
+    if (!listEl) return;
+
+    const query = (document.getElementById('gc-student-search-input')?.value || '').trim().toLowerCase();
+    const filtered = query
+        ? state.students.filter(s =>
+            s.fullName.toLowerCase().includes(query) ||
+            s.email.toLowerCase().includes(query)
+        )
+        : state.students;
+
+    if (filtered.length === 0) {
+        listEl.innerHTML = `<div style="padding:8px; font-size:11px; color:#64748b; text-align:center;">No matching students</div>`;
+        updateGcStudentToggleSummary();
+        return;
+    }
+
+    listEl.innerHTML = filtered.map(st => {
+        const isChecked = state.selectedIds.has(st.userId);
+        return `
+            <label title="${escapeStudentAttr(st.email)}"
+                style="display:flex; align-items:center; gap:7px; padding:5px 8px; border-bottom:1px solid #f1f5f9; font-size:12px; color:#1e293b; cursor:pointer; margin:0; background:${isChecked ? '#eff6ff' : '#ffffff'};">
+                <input type="checkbox" value="${escapeStudentAttr(st.userId)}" ${isChecked ? 'checked' : ''}
+                    onchange="toggleSingleGcStudent('${escapeStudentAttr(st.userId)}', this.checked)"
+                    style="width:14px; height:14px; margin:0; accent-color:#2563eb; cursor:pointer; flex-shrink:0;">
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${escapeStudentAttr(st.fullName)}</span>
+            </label>
+        `;
+    }).join('');
+
+    updateGcStudentToggleSummary();
+}
+
+function toggleSingleGcStudent(userId, isChecked) {
+    const state = window.gcCourseStudentsState;
+    if (isChecked) {
+        state.selectedIds.add(userId);
+    } else {
+        state.selectedIds.delete(userId);
+    }
+    renderGcStudentChecklist();
+}
+
+function toggleAllGcStudents(selectAll) {
+    const state = window.gcCourseStudentsState;
+    if (selectAll) {
+        state.selectedIds = new Set(state.students.map(s => s.userId));
+    } else {
+        state.selectedIds.clear();
+    }
+    renderGcStudentChecklist();
+}
+
+async function loadCourseStudents(courseId, preselectAssign = null) {
+    const wrapper = ensureCourseStudentSelectorUI();
+    if (!wrapper) return;
+
+    if (!courseId) {
+        resetCourseStudentSelector();
+        return;
+    }
+
+    // Avoid duplicate concurrent fetch if already loaded for this course and no preselection override is passed
+    if (
+        !preselectAssign &&
+        window.gcCourseStudentsState.courseId === courseId &&
+        (window.gcCourseStudentsState.isLoading || window.gcCourseStudentsState.students.length > 0)
+    ) {
+        wrapper.style.display = 'block';
+        return;
+    }
+
+    const requestToken = ((window.gcCourseStudentsState && window.gcCourseStudentsState.loadToken) || 0) + 1;
+
+    wrapper.style.display = 'block';
+    window.gcCourseStudentsState = {
+        courseId,
+        students: [],
+        selectedIds: new Set(),
+        isLoading: true,
+        isOpen: false,
+        loadToken: requestToken
+    };
+    updateGcStudentToggleSummary();
+
+    const listEl = document.getElementById('gc-student-checklist');
+    if (listEl) listEl.innerHTML = `<div style="padding:8px; font-size:11px; color:#64748b; text-align:center;">Loading roster...</div>`;
+
+    try {
+        await ensureGapiClassroomLoaded();
+
+        let allRawStudents = [];
+        let pageToken = null;
+        do {
+            const params = { courseId, pageSize: 100 };
+            if (pageToken) params.pageToken = pageToken;
+            const res = await gapi.client.classroom.courses.students.list(params);
+            if (window.gcCourseStudentsState.loadToken !== requestToken) return;
+            allRawStudents = allRawStudents.concat(res.result.students || []);
+            pageToken = res.result.nextPageToken || null;
+        } while (pageToken);
+
+        if (window.gcCourseStudentsState.loadToken !== requestToken) return;
+
+        const normalized = allRawStudents.map(st => {
+            const profile = st.profile || {};
+            const nameObj = profile.name || {};
+            const fullName = nameObj.fullName || profile.emailAddress || st.userId;
+            const sortKey = `${nameObj.familyName || ''} ${nameObj.givenName || fullName}`.trim().toLowerCase();
+            return {
+                userId: String(st.userId),
+                fullName,
+                sortKey,
+                email: (profile.emailAddress || '').toLowerCase()
+            };
+        }).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+        let selectedIds;
+        if (preselectAssign && preselectAssign.assigneeMode === 'INDIVIDUAL_STUDENTS') {
+            const savedIds = new Set((preselectAssign.assignedStudentIds || []).map(String));
+            const savedEmails = new Set((preselectAssign.assignedStudentEmails || []).map(e => e.toLowerCase()));
+            selectedIds = new Set(
+                normalized
+                    .filter(s => savedIds.has(s.userId) || (s.email && savedEmails.has(s.email)))
+                    .map(s => s.userId)
+            );
+        } else {
+            selectedIds = new Set(normalized.map(s => s.userId));
+        }
+
+        window.gcCourseStudentsState = {
+            courseId,
+            students: normalized,
+            selectedIds,
+            isLoading: false,
+            isOpen: false,
+            loadToken: requestToken
+        };
+
+        renderGcStudentChecklist();
+
+        if (preselectAssign && preselectAssign.assigneeMode === 'INDIVIDUAL_STUDENTS') {
+            toggleGcStudentDropdown(true);
+        } else {
+            toggleGcStudentDropdown(false);
+        }
+    } catch (err) {
+        if (window.gcCourseStudentsState.loadToken !== requestToken) return;
+        console.warn("Could not load course students:", err);
+        window.gcCourseStudentsState.isLoading = false;
+        const labelEl = document.getElementById('gc-student-toggle-label');
+        if (labelEl) labelEl.textContent = '⚠️ Could not load students';
+    }
+}
+
 async function openClassroomPublishSection() {
     const assignFields = document.getElementById('classroom-assign-fields');
     assignFields.style.display = 'block';
-    
+
+    ensureCourseStudentSelectorUI();
+    resetCourseStudentSelector();
+
     // Smooth scroll only the right panel container
     if (assignFields.parentElement) {
         assignFields.parentElement.scrollTo({ top: assignFields.parentElement.scrollHeight, behavior: 'smooth' });
@@ -2508,7 +2821,14 @@ async function openClassroomPublishSection() {
 }
 
 async function loadCourseTopics(courseId) {
-    if (!courseId) return;
+    if (!courseId) {
+        resetCourseStudentSelector();
+        return;
+    }
+
+    // Trigger student roster load in parallel whenever a course is selected
+    loadCourseStudents(courseId);
+
     try {
         await ensureGapiClassroomLoaded();
         const res = await gapi.client.classroom.courses.topics.list({ courseId: courseId });
@@ -2528,6 +2848,24 @@ async function publishTaskToClassroom() {
     const courseName = courseSelect?.options?.[courseSelect.selectedIndex]?.text || '';
 
     if (!courseId) return alert("Select a Google Classroom course.");
+
+    // Validate selected students from the course roster
+    const studentState = window.gcCourseStudentsState || { students: [], selectedIds: new Set() };
+    const totalStudents = studentState.students.length;
+    const selectedStudentIds = Array.from(studentState.selectedIds);
+
+    if (totalStudents > 0 && selectedStudentIds.length === 0) {
+        toggleGcStudentDropdown(true);
+        return alert("Please select at least one student to assign this task to.");
+    }
+
+    const isIndividual = totalStudents > 0 && selectedStudentIds.length < totalStudents;
+    const assigneeMode = isIndividual ? 'INDIVIDUAL_STUDENTS' : 'ALL_STUDENTS';
+    const selectedStudentEmails = isIndividual
+        ? studentState.students
+            .filter(s => studentState.selectedIds.has(s.userId) && s.email)
+            .map(s => s.email)
+        : [];
 
     const selectedActivities = Array.from(document.querySelectorAll('#activity-list input[type="checkbox"]:checked'))
         .map(c => c.value)
@@ -2643,6 +2981,9 @@ async function publishTaskToClassroom() {
                 title: title,
                 builderId: targetBuilderId,
                 builderSnapshot: builderSnapshot,
+                assigneeMode: assigneeMode,
+                assignedStudentIds: isIndividual ? selectedStudentIds : [],
+                assignedStudentEmails: isIndividual ? selectedStudentEmails : [],
                 selectedActivities: selectedActivities,
                 listenTradGapLevel: listenTradGapLevel,
                 listenDictationGapLevel: listenDictationGapLevel,
@@ -2687,6 +3028,37 @@ async function publishTaskToClassroom() {
                     updateMask: updateMasks.join(","),
                     resource: cwPatch
                 });
+
+                // Sync individual student assignees in Google Classroom when changed
+                const prevMode = existingData.assigneeMode || 'ALL_STUDENTS';
+                const prevIds = (existingData.assignedStudentIds || []).map(String);
+                const addStudentIds = assigneeMode === 'INDIVIDUAL_STUDENTS'
+                    ? selectedStudentIds.filter(id => !prevIds.includes(id))
+                    : [];
+                const removeStudentIds = assigneeMode === 'INDIVIDUAL_STUDENTS'
+                    ? prevIds.filter(id => !selectedStudentIds.includes(id))
+                    : [];
+
+                const shouldModifyAssignees =
+                    prevMode !== assigneeMode ||
+                    addStudentIds.length > 0 ||
+                    removeStudentIds.length > 0;
+
+                if (shouldModifyAssignees) {
+                    const modifyResource = { assigneeMode };
+                    if (assigneeMode === 'INDIVIDUAL_STUDENTS') {
+                        modifyResource.modifyIndividualStudentsOptions = {
+                            addStudentIds,
+                            removeStudentIds
+                        };
+                    }
+
+                    await gapi.client.classroom.courses.courseWork.modifyAssignees({
+                        courseId: existingData.courseId,
+                        id: existingData.gClassroomAssignmentId,
+                        resource: modifyResource
+                    });
+                }
             }
 
             alert("✅ Assignment updated and synced with Google Classroom!");
@@ -2710,8 +3082,13 @@ async function publishTaskToClassroom() {
             description: `Use the link below to complete the interactive tasks. Make sure to log in using your school Google account`,
             workType: 'ASSIGNMENT',
             maxPoints: maxPoints > 0 ? maxPoints : 10,
+            assigneeMode: assigneeMode,
             materials: [{ link: { url: studentUrl, title: "Interactive Sentence Task" } }]
         };
+
+        if (isIndividual) {
+            cwPayload.individualStudentsOptions = { studentIds: selectedStudentIds };
+        }
 
         if (gcDueDate && gcDueTime) {
             cwPayload.dueDate = gcDueDate;
@@ -2742,6 +3119,9 @@ async function publishTaskToClassroom() {
             gClassroomAssignmentId: res.result.id,
             courseId: courseId,
             courseName: courseName,
+            assigneeMode: assigneeMode,
+            assignedStudentIds: isIndividual ? selectedStudentIds : [],
+            assignedStudentEmails: isIndividual ? selectedStudentEmails : [],
             title: title,
             lang: window.duplicatingAssignmentLang || document.getElementById('meta-lang')?.value || meta.lang || "French",
             selectedActivities: selectedActivities,
