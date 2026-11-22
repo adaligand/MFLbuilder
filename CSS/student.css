@@ -225,6 +225,140 @@
     border-color: #ef4444 !important;
     color: #991b1b;
 }
+/* BEAT THE ROBOT (SIDE-BY-SIDE YOU VS ROBOT BOARD) */
+.br-board-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+@media (max-width: 768px) {
+    .br-board-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.br-panel {
+    position: relative;
+    padding: 20px;
+    border-radius: 8px;
+    text-align: center;
+    overflow: hidden;
+}
+
+.br-panel.br-player {
+    background-color: #f0f8ff;
+}
+
+.br-panel.br-computer {
+    background-color: #fff0f5;
+}
+
+.br-panel-title {
+    font-size: 1.8em;
+    text-align: center;
+    margin: 0 0 16px 0;
+    color: #0f172a;
+}
+
+.br-source-container {
+    text-align: center;
+    margin-bottom: 18px;
+}
+
+.br-source-label {
+    font-size: 1.05em;
+    color: #555555;
+    margin-bottom: 4px;
+}
+
+.br-source-sentence {
+    font-size: 1.4em;
+    font-weight: bold;
+    color: #333333;
+}
+
+.br-question-container {
+    font-size: 1.5em;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 5px;
+    min-height: 90px;
+}
+
+.br-question-container .word-wrapper {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    margin: 0 5px;
+}
+
+.br-question-container .single-letter {
+    width: 25px;
+    height: 35px;
+    text-align: center;
+    font-size: 1em;
+    font-weight: bold;
+    border: none;
+    border-bottom: 2px solid #cccccc;
+    background: transparent;
+    margin: 0 1px;
+    padding: 0;
+    color: #0f172a;
+}
+
+.br-question-container .single-letter:focus {
+    outline: none;
+    border-bottom-color: #007bff;
+}
+
+.br-question-container .single-letter.correct-answer {
+    border-bottom-color: #28a745 !important;
+    color: #28a745 !important;
+}
+
+.br-question-container .single-letter.wrong-answer {
+    border-bottom-color: #dc3545 !important;
+    color: #dc3545 !important;
+}
+
+.br-question-container .static-char,
+.br-question-container .punctuation {
+    display: inline-block;
+    padding: 0 2px;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.br-status-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    font-size: 3em;
+    font-weight: bold;
+    border-radius: 8px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.br-player .br-status-overlay {
+    background: rgba(40, 167, 69, 0.85);
+}
+
+.br-computer .br-status-overlay {
+    background: rgba(220, 53, 69, 0.85);
+}
+
+.br-status-overlay.visible {
+    opacity: 1;
+}
 /* LETTER INPUT BOX FOR VOWELS / CONSONANTS */
 .letter-box {
     width: 24px;
