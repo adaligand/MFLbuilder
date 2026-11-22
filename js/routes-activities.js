@@ -2,6 +2,40 @@
    PREVIEW & OPTIONS MENU
 ========================= */
 const MULTI_GAP_ACTIVITY_IDS = ['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'];
+const ROBOT_SPEED_ACTIVITY_ID = 'beat-robot';
+
+function getRobotSpeedOptionsHTML(selectedSpeed = '1500') {
+    const validSpeeds = ['750', '1000', '1500', '2000', '2500', '3000'];
+    const normalized = validSpeeds.includes(String(selectedSpeed))
+        ? String(selectedSpeed)
+        : '1500';
+    const options = [
+        { val: '750', label: 'Turbo (0.75s)' },
+        { val: '1000', label: 'Fast (1.0s)' },
+        { val: '1500', label: 'Medium (1.5s)' },
+        { val: '2000', label: 'Slow (2.0s)' },
+        { val: '2500', label: 'Very Slow (2.5s)' },
+        { val: '3000', label: 'Relaxed (3.0s)' }
+    ];
+    return options
+        .map(o => `<option value="${o.val}" ${o.val === normalized ? 'selected' : ''}>${o.label}</option>`)
+        .join('');
+}
+
+function onRobotSpeedChange(selectEl) {
+    const chk = document.getElementById('chk-beat-robot');
+    if (chk && !chk.checked) {
+        chk.checked = true;
+        renderPerActivitySentenceBoxes();
+        return;
+    }
+    const label = selectEl?.options?.[selectEl.selectedIndex]?.text || 'Medium (1.5s)';
+    const badge = document.getElementById('beat-robot-card-speed-badge');
+    if (badge) {
+        badge.innerText = `(${label})`;
+    }
+    updateAssignmentTimeEstimate();
+}
 const AUDIO_ACTIVITY_IDS = [
     'listen-trad',
     'listen-dictation',
@@ -68,17 +102,30 @@ function resolveActivityGapLevelFromArg(actId, gapLevelsOrSingle = '1') {
 
 function buildActivitySelectorRowHTML(a, gapLevelsOrSingle = '1', extraRowStyle = 'flex: 0 0 auto !important; height: auto !important; min-height: 0 !important; padding: 6px 6px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 6px;') {
     const isMultiGap = MULTI_GAP_ACTIVITY_IDS.includes(a.id);
+    const isRobotSpeed = (a.id === ROBOT_SPEED_ACTIVITY_ID);
     const selectedLevel = resolveActivityGapLevelFromArg(a.id, gapLevelsOrSingle);
+    const selectedSpeed = (gapLevelsOrSingle && typeof gapLevelsOrSingle === 'object' && gapLevelsOrSingle['beat-robot'])
+        ? String(gapLevelsOrSingle['beat-robot'])
+        : '1500';
 
-    const dropdownHTML = isMultiGap
-        ? `<select id="${a.id}-gap-select"
+    let dropdownHTML = '';
+    if (isMultiGap) {
+        dropdownHTML = `<select id="${a.id}-gap-select"
                 onclick="event.stopPropagation()"
                 onchange="event.stopPropagation(); onActivityGapLevelChange('${a.id}', this)"
                 title="Choose how many words are removed in ${a.label}"
                 style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
                 ${getActivityGapOptionsHTML(selectedLevel)}
-           </select>`
-        : '';
+           </select>`;
+    } else if (isRobotSpeed) {
+        dropdownHTML = `<select id="beat-robot-speed-select"
+                onclick="event.stopPropagation()"
+                onchange="event.stopPropagation(); onRobotSpeedChange(this)"
+                title="Choose how fast the robot types each letter"
+                style="margin-left:auto; flex-shrink:0; max-width:118px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                ${getRobotSpeedOptionsHTML(selectedSpeed)}
+           </select>`;
+    }
 
     return `
         <div class="activity-row" style="${extraRowStyle}">
@@ -520,7 +567,11 @@ function estimateSingleSentenceSeconds(actId, sentenceObj) {
         case 'cons':
             // Reconstructing every word from partial letter skeleton + recalling accents/endings
             return 7.0 + (chars * 0.65);
-
+case 'beat-robot': {
+    const speedMs = parseInt(document.getElementById('beat-robot-speed-select')?.value || '1500', 10) || 1500;
+    const approxMissingLetters = Math.max(2, Math.round(chars * 0.45));
+    return 4.5 + (approxMissingLetters * Math.min(speedMs / 1000, 1.8));
+}
         case 'listen-trad': {
             const { count, pct } = getGapStats(actId);
             // More missing English words = more replays & longer translation recall
@@ -958,6 +1009,7 @@ function openActivityMenu() {
         {id:'gap-t', label:`Gap Fill (${currentLang})`}, 
         {id:'vowels', label:'Missing Vowels'}, 
         {id:'cons', label:'Missing Consonants'}, 
+       {id:'beat-robot', label:'🤖 Beat the Robot'},
         {id:'faulty', label:'Faulty Translation'}, 
         {id:'trans-en', label:'Translate (English)'}, 
         {id:'trans-target', label:`Translate (${currentLang})`},
@@ -2007,7 +2059,11 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null, preserveCat
             const badgeId = actId === 'delayed-copying' ? 'dc-card-gap-badge' : `${actId}-card-gap-badge`;
             gapBadgeHTML = `<span id="${badgeId}" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${gapLabel} removed)</span>`;
         }
-
+if (actId === 'beat-robot') {
+    const speedSelect = document.getElementById('beat-robot-speed-select');
+    const speedLabel = speedSelect ? (speedSelect.options[speedSelect.selectedIndex]?.text || 'Medium (1.5s)') : 'Medium (1.5s)';
+    gapBadgeHTML = `<span id="beat-robot-card-speed-badge" style="font-size:12px; font-weight:600; color:#7c3aed; background:#ede9fe; padding:2px 8px; border-radius:10px;">(${speedLabel})</span>`;
+}
         const isExpanded = expandedActivityIds.has(actId);
 
         html += `
@@ -2027,6 +2083,7 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null, preserveCat
                 </div>
                 <div id="act-body-${actId}" class="act-card-body" data-activity-id="${actId}" style="display:${isExpanded ? 'block' : 'none'};">
                     ${actSents.map((s, idx) => {
+                       
                         if (actId === 'faulty' || actId === 'listen-faulty') {
                             const faultyVal = getOrGenerateFaultyTr(s);
                             return `
@@ -2459,7 +2516,9 @@ async function publishTaskToClassroom() {
     const delayedCopyingGapLevel = selectedActivities.includes('delayed-copying')
         ? (document.getElementById('delayed-copying-gap-select')?.value || '1')
         : '1';
-
+const beatRobotSpeed = selectedActivities.includes('beat-robot')
+    ? (document.getElementById('beat-robot-speed-select')?.value || '1500')
+    : '1500';
     const activityGapLevels = {
         'listen-trad': listenTradGapLevel,
         'listen-dictation': listenDictationGapLevel,
