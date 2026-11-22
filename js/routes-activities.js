@@ -1877,7 +1877,13 @@ function renderPerActivitySentenceBoxes(overrideSentencesMap = null, preserveCat
     ensureGroupedActivityList();
     updateActivityCategoryCounts(Boolean(overrideSentencesMap) && !preserveCategoryState);
 
-    // Preserve currently expanded exercise cards across re-renders
+    const container = document.getElementById('per-activity-sentences-container');
+    if (container && !container.dataset.timeEstimateBound) {
+        container.addEventListener('input', () => updateAssignmentTimeEstimate());
+        container.dataset.timeEstimateBound = 'true';
+    }
+
+      // Preserve currently expanded exercise cards across re-renders
     const expandedActivityIds = new Set();
     if (container) {
         container.querySelectorAll('.act-card-body').forEach(bodyEl => {
