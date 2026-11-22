@@ -3,6 +3,14 @@
 ========================= */
 const TEACHER_GAP_DROPDOWN_ACTIVITIES = ['listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying'];
 
+function escapeHtmlAttr(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 function formatGapLevelLabel(rawLevel) {
     const cleaned = String(rawLevel || '1').replace('%', '').trim();
     const labels = {
@@ -43,6 +51,16 @@ function getAssignmentGapLevelMap(assign = {}) {
     };
 }
 
+function normalizeBeatRobotModeValue(rawMode) {
+    const cleaned = String(rawMode ?? 'vowels').trim().toLowerCase();
+    return ['vowels', 'consonants'].includes(cleaned) ? cleaned : 'vowels';
+}
+
+function formatBeatRobotModeLabel(rawMode) {
+    const mode = normalizeBeatRobotModeValue(rawMode);
+    return mode === 'consonants' ? 'Consonants removed' : 'Vowels removed';
+}
+
 function normalizeRobotSpeedValue(rawSpeed) {
     const cleaned = String(rawSpeed ?? 'normal').trim().toLowerCase();
     return cleaned || 'normal';
@@ -50,6 +68,9 @@ function normalizeRobotSpeedValue(rawSpeed) {
 
 function formatRobotSpeedLabel(rawSpeed) {
     const val = normalizeRobotSpeedValue(rawSpeed);
+    if (val === 'vowels' || val === 'consonants') {
+        return formatBeatRobotModeLabel(val);
+    }
     const labels = {
         'slow': 'Slow',
         'normal': 'Normal',
@@ -66,7 +87,30 @@ function formatRobotSpeedLabel(rawSpeed) {
     return val.charAt(0).toUpperCase() + val.slice(1);
 }
 
-function renderTeacherActivityListRows(list, selectedGapLevels = '1', selectedRobotSpeed = 'normal') {
+function getTeacherActivityMenuList(currentLang) {
+    return [
+        { id: 'match', label: 'Match up' },
+        { id: 'nospaces', label: 'No Spaces' },
+        { id: 'jumbled', label: 'Unjumble' },
+        { id: 'gap-en', label: 'Gap Fill (English)' },
+        { id: 'gap-t', label: `Gap Fill (${currentLang})` },
+        { id: 'vowels', label: 'Missing Vowels' },
+        { id: 'cons', label: 'Missing Consonants' },
+        { id: 'beat-robot', label: '🤖 Beat the Robot' },
+        { id: 'faulty', label: 'Faulty Translation' },
+        { id: 'trans-en', label: 'Translate (English)' },
+        { id: 'trans-target', label: `Translate (${currentLang})` },
+        { id: 'listen-trad', label: '🎧 Translation' },
+        { id: 'listen-dictation', label: '🎧 Dictation' },
+        { id: 'delayed-dictation', label: '🎧 Delayed Dictation' },
+        { id: 'delayed-copying', label: 'Delayed Copying' },
+        { id: 'listen-missing', label: '🎧 Missing Detail' },
+        { id: 'listen-faulty', label: '🎧 Faulty Translation' },
+        { id: 'listen-jumbled', label: '🎧 Unjumble' }
+    ];
+}
+
+function renderTeacherActivityListRows(list, selectedGapLevels = '1', selectedRobotMode = 'vowels') {
     const gapMap = (selectedGapLevels && typeof selectedGapLevels === 'object')
         ? {
             'listen-trad': normalizeGapLevelValue(selectedGapLevels['listen-trad'] || '1'),
@@ -80,7 +124,7 @@ function renderTeacherActivityListRows(list, selectedGapLevels = '1', selectedRo
             'delayed-dictation': '1',
             'delayed-copying': normalizeGapLevelValue(selectedGapLevels)
         };
-    const normalizedSpeed = normalizeRobotSpeedValue(selectedRobotSpeed);
+    const normalizedMode = normalizeBeatRobotModeValue(selectedRobotMode);
 
     const buildOptionsHTML = (selectedVal) => [
         { val: '1', label: '1 word' },
@@ -90,45 +134,43 @@ function renderTeacherActivityListRows(list, selectedGapLevels = '1', selectedRo
         { val: '100', label: '100% of words' }
     ].map(o => `<option value="${o.val}" ${o.val === selectedVal ? 'selected' : ''}>${o.label}</option>`).join('');
 
-    const buildRobotOptions = (selectedVal) => {
-        if (typeof getRobotSpeedOptionsHTML === 'function') {
-            return getRobotSpeedOptionsHTML(selectedVal);
+    const buildBeatRobotModeOptions = (selectedVal) => {
+        if (typeof getBeatRobotModeOptionsHTML === 'function') {
+            return getBeatRobotModeOptionsHTML(selectedVal);
         }
         return [
-            { val: 'slow', label: '🐢 Slow' },
-            { val: 'normal', label: '🤖 Normal' },
-            { val: 'fast', label: '⚡ Fast' },
-            { val: 'turbo', label: '🚀 Turbo' }
+            { val: 'vowels', label: 'Vowels' },
+            { val: 'consonants', label: 'Consonants' }
         ].map(o => `<option value="${o.val}" ${o.val === selectedVal ? 'selected' : ''}>${o.label}</option>`).join('');
     };
 
-    return list.map(a => {
+    return list.filter(a => a.id !== 'study').map(a => {
         const hasGapDropdown = TEACHER_GAP_DROPDOWN_ACTIVITIES.includes(a.id);
         const isBeatRobot = (a.id === 'beat-robot');
         const selectId = `${a.id}-gap-select`;
         const selectedVal = gapMap[a.id] || '1';
 
         return `
-            <div class="activity-row" style="display:flex; align-items:center; gap:8px;">
+            <div class="activity-row" style="display:flex; align-items:center; gap:6px; padding:6px 6px; border-bottom:1px solid #f1f5f9;">
                 <input type="checkbox" value="${a.id}" id="chk-${a.id}" onchange="renderPerActivitySentenceBoxes()">
-                <label for="chk-${a.id}" style="cursor:pointer; font-weight:500;">${a.label}</label>
+                <label for="chk-${a.id}" style="cursor:pointer; font-weight:500; font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin:0;">${a.label}</label>
                 ${hasGapDropdown ? `
                     <select id="${selectId}"
                             data-gap-activity="${a.id}"
                             onclick="event.stopPropagation()"
                             onchange="event.stopPropagation(); if (typeof onActivityGapLevelChange === 'function') { onActivityGapLevelChange('${a.id}', this); } else if ('${a.id}' === 'delayed-copying' && typeof onDelayedCopyingGapLevelChange === 'function') { onDelayedCopyingGapLevelChange(this); }"
                             title="Choose how many words are removed in ${a.label.replace(/^🎧\s*/, '')}"
-                            style="margin-left:auto; padding:3px 8px; border-radius:6px; border:1px solid #cbd5e1; font-size:12px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                            style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
                         ${buildOptionsHTML(selectedVal)}
                     </select>
                 ` : ''}
                 ${isBeatRobot ? `
-                    <select id="beat-robot-speed-select"
+                    <select id="beat-robot-mode-select"
                             onclick="event.stopPropagation()"
-                            onchange="event.stopPropagation(); if (typeof onRobotSpeedChange === 'function') onRobotSpeedChange(this);"
-                            title="Choose robot speed"
-                            style="margin-left:auto; padding:3px 8px; border-radius:6px; border:1px solid #cbd5e1; font-size:12px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
-                        ${buildRobotOptions(normalizedSpeed)}
+                            onchange="event.stopPropagation(); if (typeof onBeatRobotModeChange === 'function') { onBeatRobotModeChange(this); } else if (typeof onRobotSpeedChange === 'function') { onRobotSpeedChange(this); }"
+                            title="Choose whether vowels or consonants are removed in ${a.label}"
+                            style="margin-left:auto; flex-shrink:0; max-width:112px; padding:2px 5px; border-radius:6px; border:1px solid #cbd5e1; font-size:11px; font-weight:600; color:#1e293b; background:#fff; cursor:pointer;">
+                        ${buildBeatRobotModeOptions(normalizedMode)}
                     </select>
                 ` : ''}
             </div>
@@ -153,7 +195,8 @@ async function previewActiveAssignmentAsStudent() {
     currentStudentAssignment = {
         ...rawAssign,
         id: assignmentId,
-        beatRobotSpeed: normalizeRobotSpeedValue(rawAssign.beatRobotSpeed),
+        beatRobotMode: normalizeBeatRobotModeValue(rawAssign.beatRobotMode),
+        beatRobotSpeed: normalizeRobotSpeedValue(rawAssign.beatRobotSpeed || '1500'),
         listenTradGapLevel: gapMap['listen-trad'],
         listenDictationGapLevel: gapMap['listen-dictation'],
         delayedDictationGapLevel: gapMap['delayed-dictation'],
@@ -172,13 +215,17 @@ async function previewActiveAssignmentAsStudent() {
     const previewBanner = document.getElementById('teacher-preview-banner');
     if (previewBanner) previewBanner.style.display = 'flex';
 
-    document.getElementById('student-login-box').style.display = 'none';
+    const loginBox = document.getElementById('student-login-box');
+    if (loginBox) loginBox.style.display = 'none';
     const authTextEl = document.getElementById('student-auth-instruction-text');
     if (authTextEl) authTextEl.style.display = 'none';
 
-    document.getElementById('student-profile-badge').style.display = 'inline-block';
-    document.getElementById('student-display-name').innerText = (currentUser?.displayName || 'Teacher') + ' (Teacher Preview)';
-    document.getElementById('student-display-email').innerText = `(${currentUser?.email || ''})`;
+    const profileBadge = document.getElementById('student-profile-badge');
+    if (profileBadge) profileBadge.style.display = 'inline-block';
+    const displayNameEl = document.getElementById('student-display-name');
+    if (displayNameEl) displayNameEl.innerText = (currentUser?.displayName || 'Teacher') + ' (Teacher Preview)';
+    const displayEmailEl = document.getElementById('student-display-email');
+    if (displayEmailEl) displayEmailEl.innerText = `(${currentUser?.email || ''})`;
 
     const selectedActivities = currentStudentAssignment.selectedActivities || [];
     studentExerciseTypes = selectedActivities.filter(a => a !== 'study');
@@ -189,23 +236,27 @@ async function previewActiveAssignmentAsStudent() {
 
     const perActSentences = currentStudentAssignment.sentencesPerActivity || {};
     const hasStudySelected = selectedActivities.includes('study');
+    const refBanner = document.getElementById('student-reference-banner');
 
     if (hasStudySelected && perActSentences['study'] && perActSentences['study'].length > 0) {
-        const refBanner = document.getElementById('student-reference-banner');
         if (refBanner) refBanner.style.display = 'block';
         let refHtml = '<table style="width:100%; border-collapse:collapse;"><thead><tr><th>Target Language</th><th>English Translation</th></tr></thead><tbody>';
         perActSentences['study'].forEach(s => { refHtml += `<tr><td><b>${s.t}</b></td><td>${s.tr}</td></tr>`; });
         refHtml += '</tbody></table>';
         const refBody = document.getElementById('ref-table-body');
         if (refBody) refBody.innerHTML = refHtml;
-    } else {
-        document.getElementById('student-reference-banner').style.display = 'none';
+    } else if (refBanner) {
+        refBanner.style.display = 'none';
     }
 
-    document.getElementById('student-marksheet-card').style.display = 'none';
-    document.getElementById('student-pending-review-card').style.display = 'none';
-    document.getElementById('student-active-exercise-card').style.display = 'block';
-    document.getElementById('student-nav-actions').style.display = 'flex';
+    const marksheetCard = document.getElementById('student-marksheet-card');
+    if (marksheetCard) marksheetCard.style.display = 'none';
+    const pendingCard = document.getElementById('student-pending-review-card');
+    if (pendingCard) pendingCard.style.display = 'none';
+    const activeExCard = document.getElementById('student-active-exercise-card');
+    if (activeExCard) activeExCard.style.display = 'block';
+    const navActions = document.getElementById('student-nav-actions');
+    if (navActions) navActions.style.display = 'flex';
 
     renderCurrentStudentExercise();
 }
@@ -232,44 +283,26 @@ async function duplicateCurrentAssignmentToClass() {
     const assign = doc.data();
     editingAssignmentId = null;
 
-    await setupAssignmentBuilderContext(assign);
+    if (typeof setupAssignmentBuilderContext === 'function') {
+        await setupAssignmentBuilderContext(assign);
+    }
 
     const clonedSentencesMap = assign.sentencesPerActivity ? JSON.parse(JSON.stringify(assign.sentencesPerActivity)) : null;
     window.duplicatingAssignmentLang = assign.lang || null;
 
     const currentLang = assign.lang || meta.lang || "Target Language";
-    const list = [
-        {id:'study', label:'Sentence Table (Reference)'}, 
-        {id:'match', label:'Match up'}, 
-        {id:'nospaces', label:'No Spaces'}, 
-        {id:'jumbled', label:'Unjumble'}, 
-        {id:'gap-en', label:'Gap Fill (English)'}, 
-        {id:'gap-t', label:`Gap Fill (${currentLang})`}, 
-        {id:'vowels', label:'Missing Vowels'}, 
-        {id:'cons', label:'Missing Consonants'}, 
-        {id:'faulty', label:'Faulty Translation'}, 
-        {id:'trans-en', label:'Translate (English)'}, 
-        {id:'trans-target', label:`Translate (${currentLang})`},
-        {id:'listen-trad', label:'🎧 Listen / Translate'},
-        {id:'listen-dictation', label:'🎧 Listening Dictation'},
-        {id:'delayed-dictation', label:'🎧 Delayed Dictation'},
-        {id:'delayed-copying', label:'Delayed Copying'},
-        {id:'listen-missing', label:'🎧 Missing Detail'},
-        {id:'listen-faulty', label:'🎧 Faulty Translation'},
-        {id:'listen-jumbled', label:'🎧 Unjumble'},
-        {id:'beat-robot', label:'🤖 Beat the Robot'}
-    ];
+    const list = getTeacherActivityMenuList(currentLang);
 
     const savedGapLevels = getAssignmentGapLevelMap(assign);
-    const savedRobotSpeed = normalizeRobotSpeedValue(assign.beatRobotSpeed);
-    document.getElementById('activity-list').innerHTML = renderTeacherActivityListRows(list, savedGapLevels, savedRobotSpeed);
+    const savedRobotMode = normalizeBeatRobotModeValue(assign.beatRobotMode);
+    document.getElementById('activity-list').innerHTML = renderTeacherActivityListRows(list, savedGapLevels, savedRobotMode);
 
-    const speedSel = document.getElementById('beat-robot-speed-select');
-    if (speedSel) speedSel.value = savedRobotSpeed;
+    const modeSel = document.getElementById('beat-robot-mode-select');
+    if (modeSel) modeSel.value = savedRobotMode;
 
     document.getElementById('builder-title').value = assign.title || '';
-    
-    const selActs = assign.selectedActivities || [];
+
+    const selActs = (assign.selectedActivities || []).filter(id => id !== 'study');
     document.querySelectorAll('#activity-list input').forEach(cb => {
         cb.checked = selActs.includes(cb.value);
     });
@@ -286,20 +319,17 @@ async function duplicateCurrentAssignmentToClass() {
     const sentCountSelect = document.getElementById('sentence-count');
     if (sentCountSelect) sentCountSelect.value = String(detectedCount);
 
-    if (clonedSentencesMap && clonedSentencesMap['study']) {
-        const tableCountSelect = document.getElementById('table-sentence-count');
-        if (tableCountSelect) tableCountSelect.value = String(clonedSentencesMap['study'].length);
-    }
-
     renderPerActivitySentenceBoxes(clonedSentencesMap);
 
     document.getElementById('activity-menu').style.display = 'flex';
     document.getElementById('overlay').style.display = 'block';
 
     await openClassroomPublishSection();
-    
-    document.getElementById('gc-due-date').value = '';
-    document.getElementById('gc-schedule-date').value = '';
+
+    const dueInput = document.getElementById('gc-due-date');
+    const schedInput = document.getElementById('gc-schedule-date');
+    if (dueInput) dueInput.value = '';
+    if (schedInput) schedInput.value = '';
 
     const gcBtn = document.getElementById('gc-publish-btn');
     if (gcBtn) gcBtn.innerText = "📋 Duplicate & Publish";
@@ -320,6 +350,19 @@ async function downloadActiveAssignmentWorksheet() {
     const selectedActs = assign.selectedActivities || Object.keys(perAct);
 
     if (selectedActs.length === 0) return alert("No activities found in assignment.");
+
+    const fallbackActivityTitles = {
+        'match': 'Match up',
+        'nospaces': 'No Spaces',
+        'jumbled': 'Unjumble',
+        'gap-en': 'Gap Fill (English)',
+        'gap-t': `Gap Fill (${docLang})`,
+        'vowels': 'Missing Vowels',
+        'cons': 'Missing Consonants',
+        'faulty': 'Faulty Translation',
+        'trans-en': 'Translate (English)',
+        'trans-target': `Translate (${docLang})`
+    };
 
     const activityInstructions = {
         'match': 'Match each ' + docLang + ' sentence (1–10) with its correct English translation (A–J).',
@@ -353,7 +396,10 @@ async function downloadActiveAssignmentWorksheet() {
         if (['beat-robot', 'listen-trad', 'listen-dictation', 'delayed-dictation', 'delayed-copying', 'listen-missing', 'listen-faulty', 'listen-jumbled'].includes(type)) return;
 
         const isStudy = (type === 'study');
-        const boxTitle = isStudy ? "Sentence Table" : ("Exercise " + exerciseCounter + ": " + getCleanActivityTitle(type, docLang));
+        const cleanTitle = (typeof getCleanActivityTitle === 'function')
+            ? getCleanActivityTitle(type, docLang)
+            : (fallbackActivityTitles[type] || type);
+        const boxTitle = isStudy ? "Sentence Table" : ("Exercise " + exerciseCounter + ": " + cleanTitle);
         if (!isStudy) exerciseCounter++;
 
         const textInstruction = isStudy ? "" : (activityInstructions[type] || "");
@@ -404,7 +450,9 @@ async function downloadActiveAssignmentWorksheet() {
                 let answerText = s.t;
 
                 if (type === 'vowels' || type === 'cons') {
-                    const pattern = (type === 'vowels') ? /[aeiouàéèíóúü]/gi : /[bcdfghjklmnpqrstvwxyz]/gi;
+                    const pattern = (type === 'vowels')
+                        ? /[aeiouáéíóúàèìòùâêîôûäëïöüÿ]/gi
+                        : /[bcdfghjklmnpqrstvwxyzßçñ]/gi;
                     out = s.t.split(' ').map(word => word.replace(pattern, ' __ ')).join('&nbsp;&nbsp;');
                 } else if (type === 'nospaces') {
                     out = s.t.replace(/\s+/g, '').toLowerCase();
@@ -535,6 +583,8 @@ async function downloadActiveAssignmentWorksheet() {
 /* =========================
    TEACHER SUBMISSIONS DASHBOARD & EDITING
 ========================= */
+window.submissionsUnsubscribe = null;
+
 function ensureSubmissionsTimeHeader() {
     const tbody = document.getElementById('submissions-table-body');
     const table = tbody ? tbody.closest('table') : null;
@@ -603,6 +653,11 @@ function formatStudentTimeSpent(sub) {
 async function loadTeacherSubmissions() {
     ensureSubmissionsTimeHeader();
 
+    if (typeof window.submissionsUnsubscribe === 'function') {
+        window.submissionsUnsubscribe();
+        window.submissionsUnsubscribe = null;
+    }
+
     const courseSelect = document.getElementById('sub-filter-course');
     const assignSelect = document.getElementById('sub-filter-assignment');
     const tbody = document.getElementById('submissions-table-body');
@@ -627,7 +682,19 @@ async function loadTeacherSubmissions() {
             return;
         }
 
-        const res = await gapi.client.classroom.courses.list({ teacherId: 'me', courseStates: 'ACTIVE' });
+        let res;
+        try {
+            res = await gapi.client.classroom.courses.list({ teacherId: 'me', courseStates: ['ACTIVE'] });
+        } catch (authErr) {
+            console.warn("Classroom API rejected current token, requesting account selection...", authErr);
+            localStorage.removeItem('oauth_token');
+            localStorage.removeItem('oauth_token_expiry');
+            if (typeof ensureClassroomToken === 'function') {
+                await ensureClassroomToken(true);
+            }
+            res = await gapi.client.classroom.courses.list({ teacherId: 'me', courseStates: ['ACTIVE'] });
+        }
+
         const courses = res.result.courses || [];
 
         if (courses.length === 0) {
@@ -648,6 +715,11 @@ async function loadTeacherSubmissions() {
 
 async function loadCourseAssignments(courseId) {
     ensureSubmissionsTimeHeader();
+
+    if (typeof window.submissionsUnsubscribe === 'function') {
+        window.submissionsUnsubscribe();
+        window.submissionsUnsubscribe = null;
+    }
 
     const assignSelect = document.getElementById('sub-filter-assignment');
     const infoBanner = document.getElementById('active-assignment-info');
@@ -717,6 +789,11 @@ async function loadCourseAssignments(courseId) {
 async function renderStudentSubmissionsTable() {
     ensureSubmissionsTimeHeader();
 
+    if (typeof window.submissionsUnsubscribe === 'function') {
+        window.submissionsUnsubscribe();
+        window.submissionsUnsubscribe = null;
+    }
+
     const assignmentId = document.getElementById('sub-filter-assignment').value;
     const tbody = document.getElementById('submissions-table-body');
     const infoBanner = document.getElementById('active-assignment-info');
@@ -739,7 +816,7 @@ async function renderStudentSubmissionsTable() {
             const gapMap = getAssignmentGapLevelMap(assign);
 
             if (selActs.includes('listen-dictation')) {
-                metaText += ` | Listening Dictation: ${formatGapLevelLabel(gapMap['listen-dictation'])}`;
+                metaText += ` | Dictation: ${formatGapLevelLabel(gapMap['listen-dictation'])}`;
             }
             if (selActs.includes('delayed-dictation')) {
                 metaText += ` | Delayed Dictation: ${formatGapLevelLabel(gapMap['delayed-dictation'])}`;
@@ -748,10 +825,13 @@ async function renderStudentSubmissionsTable() {
                 metaText += ` | Delayed Copying: ${formatGapLevelLabel(gapMap['delayed-copying'])}`;
             }
             if (selActs.includes('listen-trad')) {
-                metaText += ` | Listen / Translate: ${formatGapLevelLabel(gapMap['listen-trad'])}`;
+                metaText += ` | Translation: ${formatGapLevelLabel(gapMap['listen-trad'])}`;
             }
             if (selActs.includes('beat-robot')) {
-                metaText += ` | 🤖 Beat the Robot: ${formatRobotSpeedLabel(assign.beatRobotSpeed)}`;
+                const robotInfo = assign.beatRobotMode
+                    ? formatBeatRobotModeLabel(assign.beatRobotMode)
+                    : formatRobotSpeedLabel(assign.beatRobotSpeed);
+                metaText += ` | 🤖 Beat the Robot: ${robotInfo}`;
             }
             if (assign.dueDate) {
                 metaText += ` | Due: ${new Date(assign.dueDate).toLocaleString([], {dateStyle:'short', timeStyle:'short'})}`;
@@ -763,47 +843,51 @@ async function renderStudentSubmissionsTable() {
         }
     }
 
-    db.collection("submissions").where("assignmentId", "==", assignmentId).onSnapshot(snap => {
-        tbody.innerHTML = '';
-        
-        const subCount = snap.size;
-        const counterBadge = document.getElementById('submission-counter-badge');
-        if (counterBadge) counterBadge.innerText = `📥 ${subCount} Submitted`;
+    window.submissionsUnsubscribe = db.collection("submissions")
+        .where("assignmentId", "==", assignmentId)
+        .onSnapshot(snap => {
+            tbody.innerHTML = '';
+            
+            const subCount = snap.size;
+            const counterBadge = document.getElementById('submission-counter-badge');
+            if (counterBadge) counterBadge.innerText = `📥 ${subCount} Submitted`;
 
-        if (snap.empty) {
-            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b; padding:20px;">No student submissions found for this task yet.</td></tr>`;
-            return;
-        }
+            if (snap.empty) {
+                tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b; padding:20px;">No student submissions found for this task yet.</td></tr>`;
+                return;
+            }
 
-        snap.forEach(doc => {
-            const sub = doc.data();
-            const subId = doc.id;
+            snap.forEach(doc => {
+                const sub = doc.data();
+                const subId = doc.id;
+                const gradeVal = sub.overallGrade !== undefined ? sub.overallGrade : sub.totalEarned;
+                const safeComment = escapeHtmlAttr(sub.teacherComment || '');
 
-            tbody.innerHTML += `
-                <tr>
-                    <td><b>${sub.studentName}</b></td>
-                    <td>${sub.studentEmail}</td>
-                    <td>${sub.submittedAt ? sub.submittedAt.toDate().toLocaleString() : 'Just now'}</td>
-                    <td>
-                        ${sub.totalEarned} / ${sub.totalPossible} (${sub.percentage}%)<br>
-                        <button onclick="inspectStudentAnswers('${subId}')" class="btn-info" style="font-size:11px; padding:3px 8px; margin-top:4px;">🔍 Edit Marks & Answers</button>
-                    </td>
-                    <td>
-                        <input type="number" id="grade-${subId}" value="${sub.overallGrade !== undefined ? sub.overallGrade : sub.totalEarned}" style="width:50px; padding:4px;"> 
-                        / <input type="number" id="possible-${subId}" value="${sub.totalPossible}" style="width:50px; padding:4px;">
-                    </td>
-                    <td style="white-space:nowrap; font-weight:600; color:#334155;">${formatStudentTimeSpent(sub)}</td>
-                    <td><input type="text" id="comment-${subId}" value="${sub.teacherComment || ''}" style="width:100%; padding:4px;"></td>
-                    <td>
-                        <div style="display:flex; gap:6px; align-items:center;">
-                            <button onclick="saveAndSyncGrade('${subId}')" class="btn-purple" style="font-size:12px;">🚀 Sync</button>
-                            <button onclick="deleteStudentSubmission('${subId}')" class="btn-danger" style="font-size:12px;">🗑️ Delete</button>
-                        </div>
-                    </td>
-                </tr>
-            `;
+                tbody.innerHTML += `
+                    <tr>
+                        <td><b>${sub.studentName}</b></td>
+                        <td>${sub.studentEmail}</td>
+                        <td>${sub.submittedAt ? sub.submittedAt.toDate().toLocaleString() : 'Just now'}</td>
+                        <td>
+                            ${sub.totalEarned} / ${sub.totalPossible} (${sub.percentage}%)<br>
+                            <button onclick="inspectStudentAnswers('${subId}')" class="btn-info" style="font-size:11px; padding:3px 8px; margin-top:4px;">🔍 Edit Marks & Answers</button>
+                        </td>
+                        <td>
+                            <input type="number" id="grade-${subId}" value="${gradeVal}" style="width:50px; padding:4px;"> 
+                            / <input type="number" id="possible-${subId}" value="${sub.totalPossible}" style="width:50px; padding:4px;">
+                        </td>
+                        <td style="white-space:nowrap; font-weight:600; color:#334155;">${formatStudentTimeSpent(sub)}</td>
+                        <td><input type="text" id="comment-${subId}" value="${safeComment}" style="width:100%; padding:4px;"></td>
+                        <td>
+                            <div style="display:flex; gap:6px; align-items:center;">
+                                <button onclick="saveAndSyncGrade('${subId}')" class="btn-purple" style="font-size:12px;">🚀 Sync</button>
+                                <button onclick="deleteStudentSubmission('${subId}')" class="btn-danger" style="font-size:12px;">🗑️ Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
         });
-    });
 }
 
 async function deleteStudentSubmission(subId) {
@@ -828,42 +912,25 @@ async function editCurrentAssignment() {
 
     const assign = doc.data();
     editingAssignmentId = assignmentId;
+    window.duplicatingAssignmentLang = null;
 
-    await setupAssignmentBuilderContext(assign);
+    if (typeof setupAssignmentBuilderContext === 'function') {
+        await setupAssignmentBuilderContext(assign);
+    }
 
     const currentLang = assign.lang || meta.lang || "Target Language";
-    const list = [
-        {id:'study', label:'Sentence Table (Reference)'}, 
-        {id:'match', label:'Match up'}, 
-        {id:'nospaces', label:'No Spaces'}, 
-        {id:'jumbled', label:'Unjumble'}, 
-        {id:'gap-en', label:'Gap Fill (English)'}, 
-        {id:'gap-t', label:`Gap Fill (${currentLang})`}, 
-        {id:'vowels', label:'Missing Vowels'}, 
-        {id:'cons', label:'Missing Consonants'}, 
-        {id:'faulty', label:'Faulty Translation'}, 
-        {id:'trans-en', label:'Translate (English)'}, 
-        {id:'trans-target', label:`Translate (${currentLang})`},
-        {id:'listen-trad', label:'🎧 Listen / Translate'},
-        {id:'listen-dictation', label:'🎧 Listening Dictation'},
-        {id:'delayed-dictation', label:'🎧 Delayed Dictation'},
-        {id:'delayed-copying', label:'Delayed Copying'},
-        {id:'listen-missing', label:'🎧 Missing Detail'},
-        {id:'listen-faulty', label:'🎧 Faulty Translation'},
-        {id:'listen-jumbled', label:'🎧 Unjumble'},
-        {id:'beat-robot', label:'🤖 Beat the Robot'}
-    ];
+    const list = getTeacherActivityMenuList(currentLang);
 
     const savedGapLevels = getAssignmentGapLevelMap(assign);
-    const savedRobotSpeed = normalizeRobotSpeedValue(assign.beatRobotSpeed);
-    document.getElementById('activity-list').innerHTML = renderTeacherActivityListRows(list, savedGapLevels, savedRobotSpeed);
+    const savedRobotMode = normalizeBeatRobotModeValue(assign.beatRobotMode);
+    document.getElementById('activity-list').innerHTML = renderTeacherActivityListRows(list, savedGapLevels, savedRobotMode);
 
-    const speedSel = document.getElementById('beat-robot-speed-select');
-    if (speedSel) speedSel.value = savedRobotSpeed;
+    const modeSel = document.getElementById('beat-robot-mode-select');
+    if (modeSel) modeSel.value = savedRobotMode;
 
     document.getElementById('builder-title').value = assign.title || '';
-    
-    const selActs = assign.selectedActivities || [];
+
+    const selActs = (assign.selectedActivities || []).filter(id => id !== 'study');
     document.querySelectorAll('#activity-list input').forEach(cb => {
         cb.checked = selActs.includes(cb.value);
     });
@@ -880,11 +947,6 @@ async function editCurrentAssignment() {
     const sentCountSelect = document.getElementById('sentence-count');
     if (sentCountSelect) sentCountSelect.value = String(detectedCount);
 
-    if (assign.sentencesPerActivity && assign.sentencesPerActivity['study']) {
-        const tableCountSelect = document.getElementById('table-sentence-count');
-        if (tableCountSelect) tableCountSelect.value = String(assign.sentencesPerActivity['study'].length);
-    }
-
     renderPerActivitySentenceBoxes(assign.sentencesPerActivity || null);
 
     document.getElementById('activity-menu').style.display = 'flex';
@@ -893,10 +955,21 @@ async function editCurrentAssignment() {
     await openClassroomPublishSection();
 
     if (assign.courseId) {
-        document.getElementById('gc-course-select').value = assign.courseId;
+        const courseSelect = document.getElementById('gc-course-select');
+        if (courseSelect) {
+            const hasOption = Array.from(courseSelect.options).some(opt => opt.value === assign.courseId);
+            if (!hasOption) {
+                const opt = document.createElement('option');
+                opt.value = assign.courseId;
+                opt.textContent = assign.courseName || 'Linked Google Classroom Course';
+                courseSelect.appendChild(opt);
+            }
+            courseSelect.value = assign.courseId;
+        }
         await loadCourseTopics(assign.courseId);
         if (assign.topicId) {
-            document.getElementById('gc-topic-select').value = assign.topicId;
+            const topicSelect = document.getElementById('gc-topic-select');
+            if (topicSelect) topicSelect.value = assign.topicId;
         }
     }
 
@@ -1014,7 +1087,8 @@ async function syncAllClassroomGrades() {
             const result = await saveAndSyncGrade(doc.id, {
                 silent: true,
                 preloadedAssign: assign,
-                preloadedRoster: rosterStudents
+                preloadedRoster: rosterStudents,
+                preloadedSub: { id: doc.id, ...doc.data() }
             });
 
             if (result && result.success) {
@@ -1088,7 +1162,7 @@ async function inspectStudentAnswers(subId) {
                                         ${currentScore < 1 ? `<div style="color:#2563eb; font-weight:bold; font-size:12px; margin-top:3px;"><b>Correct Answer:</b> ${r.correctAnswer}</div>` : ''}
                                     </div>
                                     <div style="display:flex; align-items:center; gap:4px; font-weight:bold; background:#f8fafc; padding:4px 8px; border-radius:6px; border:1px solid #cbd5e1;">
-                                        <input type="number" step="0.5" min="0" max="1" 
+                                        <input type="number" step="0.5" min="0" max="${Math.max(1, currentScore)}" 
                                             class="item-score-input" 
                                             data-act-idx="${actIdx}" 
                                             data-resp-idx="${i}" 
@@ -1138,7 +1212,9 @@ async function saveItemizedMarks(subId) {
         }
     });
 
-    const totalPossible = sub.totalPossible || 10;
+    const totalPossible = (typeof sub.totalPossible === 'number' && sub.totalPossible > 0)
+        ? sub.totalPossible
+        : (inputs.length || 10);
     const pct = totalPossible > 0 ? Math.round((newEarnedTotal / totalPossible) * 100) : 0;
 
     try {
@@ -1160,20 +1236,33 @@ async function saveItemizedMarks(subId) {
 }
 
 async function saveAndSyncGrade(subId, options = {}) {
-    const { silent = false, preloadedAssign = null, preloadedRoster = null } = options;
+    const {
+        silent = false,
+        preloadedAssign = null,
+        preloadedRoster = null,
+        preloadedSub = null
+    } = options;
 
     const gradeInput = document.getElementById(`grade-${subId}`);
     const possibleInput = document.getElementById(`possible-${subId}`);
     const commentInput = document.getElementById(`comment-${subId}`);
 
-    if (!gradeInput || !possibleInput) {
+    let gradeVal, possibleVal, commentVal;
+    if (gradeInput && possibleInput) {
+        const parsedGrade = parseFloat(gradeInput.value);
+        const parsedPossible = parseFloat(possibleInput.value);
+        gradeVal = isNaN(parsedGrade) ? 0 : parsedGrade;
+        possibleVal = (!isNaN(parsedPossible) && parsedPossible > 0) ? parsedPossible : 1;
+        commentVal = commentInput ? commentInput.value.trim() : "";
+    } else if (preloadedSub) {
+        const rawGrade = preloadedSub.overallGrade !== undefined ? preloadedSub.overallGrade : preloadedSub.totalEarned;
+        gradeVal = parseFloat(rawGrade) || 0;
+        possibleVal = parseFloat(preloadedSub.totalPossible) || 1;
+        commentVal = (preloadedSub.teacherComment || "").trim();
+    } else {
         if (!silent) alert("Grade inputs not found.");
         return { success: false, message: "Grade inputs not found" };
     }
-
-    const gradeVal = parseFloat(gradeInput.value) || 0;
-    const possibleVal = parseFloat(possibleInput.value) || 1;
-    const commentVal = commentInput ? commentInput.value.trim() : "";
 
     const pct = possibleVal > 0 ? Math.round((gradeVal / possibleVal) * 100) : 0;
 
@@ -1186,12 +1275,15 @@ async function saveAndSyncGrade(subId, options = {}) {
             isReviewed: true
         });
 
-        const subDoc = await db.collection("submissions").doc(subId).get();
-        if (!subDoc.exists) {
-            if (!silent) alert("Submission not found in database.");
-            return { success: false, message: "Submission not found in database" };
+        let sub = preloadedSub;
+        if (!sub) {
+            const subDoc = await db.collection("submissions").doc(subId).get();
+            if (!subDoc.exists) {
+                if (!silent) alert("Submission not found in database.");
+                return { success: false, message: "Submission not found in database" };
+            }
+            sub = subDoc.data();
         }
-        const sub = subDoc.data();
         const studentLabel = sub.studentName || sub.studentEmail || subId;
 
         let assign = preloadedAssign;
@@ -1262,11 +1354,13 @@ async function saveAndSyncGrade(subId, options = {}) {
 
         if (commentVal) {
             try {
+                const activeToken = (typeof gapi !== 'undefined' && gapi.client && typeof gapi.client.getToken === 'function' && gapi.client.getToken()?.access_token)
+                    || localStorage.getItem('oauth_token');
                 const commentUrl = `https://classroom.googleapis.com/v1/courses/${assign.courseId}/courseWork/${assign.gClassroomAssignmentId}/studentSubmissions/${studentGcSubId}/comments`;
                 await fetch(commentUrl, {
                     method: 'POST',
                     headers: { 
-                        'Authorization': `Bearer ${localStorage.getItem('oauth_token')}`, 
+                        'Authorization': `Bearer ${activeToken}`, 
                         'Content-Type': 'application/json' 
                     },
                     body: JSON.stringify({ commentText: commentVal })
