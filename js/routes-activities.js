@@ -2608,7 +2608,7 @@ const beatRobotSpeed = selectedActivities.includes('beat-robot')
             const assignDoc = await db.collection("assignments").doc(editingAssignmentId).get();
             const existingData = assignDoc.data();
 
-            const updatePayload = {
+          const updatePayload = {
                 title: title,
                 builderId: targetBuilderId,
                 builderSnapshot: builderSnapshot,
@@ -2618,6 +2618,7 @@ const beatRobotSpeed = selectedActivities.includes('beat-robot')
                 delayedDictationGapLevel: delayedDictationGapLevel,
                 delayedCopyingGapLevel: delayedCopyingGapLevel,
                 activityGapLevels: activityGapLevels,
+                beatRobotSpeed: beatRobotSpeed,
                 sentencesPerActivity: structuredSentencesPerActivity,
                 maxPoints: maxPoints > 0 ? maxPoints : 10,
                 dueDate: dueDateVal ? new Date(dueDateVal).toISOString() : null,
@@ -2716,6 +2717,7 @@ const beatRobotSpeed = selectedActivities.includes('beat-robot')
         delayedDictationGapLevel: delayedDictationGapLevel,
         delayedCopyingGapLevel: delayedCopyingGapLevel,
         activityGapLevels: activityGapLevels,
+        beatRobotSpeed: beatRobotSpeed,
         sentencesPerActivity: structuredSentencesPerActivity,
         maxPoints: maxPoints > 0 ? maxPoints : 10,
         dueDate: dueDateVal ? new Date(dueDateVal).toISOString() : null,
